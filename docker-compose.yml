@@ -1,0 +1,93 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: royale-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - ./backend:/app/backend:ro
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+    networks:
+      - royale-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: royale-postgres
+    environment:
+      POSTGRES_DB: royale_platform
+      POSTGRES_USER: royale
+      POSTGRES_PASSWORD: royale_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U royale -d royale_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - royale-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: royale-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - royale-network
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: royale-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: royale
+      MINIO_ROOT_PASSWORD: royale_dev_password
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - royale-network
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  minio_data:
+
+networks:
+  royale-network:
+    driver: bridge

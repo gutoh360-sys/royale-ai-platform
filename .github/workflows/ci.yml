@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: Lint and Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Ruff check
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: MyPy check
+        run: uv run mypy .
+      - name: Bandit check
+        run: uv run bandit -c pyproject.toml -r backend/
+
+  test:
+    name: Tests and Coverage
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: royale_platform
+          POSTGRES_USER: royale
+          POSTGRES_PASSWORD: royale_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Run tests with coverage
+        run: uv run pytest --cov --cov-fail-under=85 -v
+        env:
+          DATABASE_URL: postgresql+asyncpg://royale:royale_dev_password@localhost:5432/royale_platform
+          REDIS_URL: redis://localhost:6379/0
+
+  check-architecture:
+    name: Architecture Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Import linter
+        run: uv run import-linter
+      - name: Check circular imports
+        run: uv run python -c "
+import ast, os, sys
+from pathlib import Path
+
+def check_circular_imports(root_dir):
+    issues = []
+    for pyfile in Path(root_dir).rglob('*.py'):
+        if 'site-packages' in str(pyfile) or '.venv' in str(pyfile):
+            continue
+        try:
+            tree = ast.parse(pyfile.read_text())
+        except Exception:
+            continue
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imports.append(node.module)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.append(alias.name)
+        if len(imports) > 20:
+            issues.append(f'{pyfile.relative_to(root_dir)}: {len(imports)} imports')
+    return issues
+
+issues = check_circular_imports(Path('backend'))
+if issues:
+    print('High import count files:')
+    for i in issues:
+        print(f'  {i}')
+print('Architecture check completed')
+"
