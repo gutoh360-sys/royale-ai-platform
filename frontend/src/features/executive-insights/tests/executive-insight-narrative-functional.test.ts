@@ -154,7 +154,7 @@ describe("ExecutiveNarrativeTemplateProvider", () => {
     const output = await provider.generate(input)
 
     for (const ref of output.referencedEvidence) {
-      const inputRecord = input as Record<string, unknown>
+      const inputRecord = input as unknown as Record<string, unknown>
       expect(inputRecord[ref.field]).toBeDefined()
     }
   })

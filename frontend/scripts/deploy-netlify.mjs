@@ -36,7 +36,7 @@ if (sourceDir) {
 }
 
 const version = {
-  version: "1.1.1",
+  version: "1.2.0",
   buildDate: new Date().toISOString(),
   environment: "production",
 }

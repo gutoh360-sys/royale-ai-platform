@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,9 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy:netlify": "npm run build && node scripts/deploy-netlify.mjs"
+    "deploy:legacy": "node scripts/deploy-netlify.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -37,7 +38,6 @@
     "eslint-config-next": "16.2.12",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.6",
-    "serve": "^14.2.6",
     "shadcn": "^4.15.0",
     "tailwindcss": "^4",
     "typescript": "^5",
