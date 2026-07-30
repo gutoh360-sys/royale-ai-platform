@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0F172A"/>
+  <rect x="48" y="48" width="1104" height="534" rx="16" fill="none" stroke="#1E293B" stroke-width="2"/>
+  <text x="600" y="280" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="96" font-weight="700" fill="#F8FAFC" letter-spacing="8">ROYALE</text>
+  <text x="600" y="340" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="28" fill="#94A3B8" letter-spacing="12">AI PLATFORM</text>
+</svg>

@@ -1,5 +1,5 @@
-import { AuthGate } from "@/features/auth/components/auth-gate";
+import { redirect } from "next/navigation";
 
 export default function RootPage() {
-  return <AuthGate />;
+  redirect("/dashboard");
 }

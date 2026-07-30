@@ -1,0 +1,57 @@
+import type { FinancialSummary } from "@/features/financial-intelligence/types"
+import { Card, CardContent } from "@/components/ui/card"
+import { DollarSign, TrendingUp, AlertTriangle, BarChart3 } from "lucide-react"
+
+interface FinancialOverviewProps {
+  summary: FinancialSummary
+}
+
+export function FinancialOverview({ summary }: FinancialOverviewProps) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <BarChart3 className="size-4 text-muted-foreground" aria-hidden="true" />
+            <p className="text-xs text-muted-foreground">Produtos</p>
+          </div>
+          <p className="font-heading text-xl font-semibold tracking-tight">{summary.productsAnalyzed}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <DollarSign className="size-4 text-success" aria-hidden="true" />
+            <p className="text-xs text-muted-foreground">Receita total</p>
+          </div>
+          <p className="font-heading text-lg font-semibold tracking-tight">
+            R$ {summary.totalRevenue.toLocaleString("pt-BR")}
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertTriangle className="size-4 text-destructive" aria-hidden="true" />
+            <p className="text-xs text-muted-foreground">Alto risco</p>
+          </div>
+          <p className="font-heading text-xl font-semibold tracking-tight text-destructive">
+            {summary.highRiskProducts}
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <TrendingUp className="size-4 text-muted-foreground" aria-hidden="true" />
+            <p className="text-xs text-muted-foreground">Saúde financeira</p>
+          </div>
+          <p className="font-heading text-xl font-semibold tracking-tight">{summary.financialHealthScore}</p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

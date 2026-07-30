@@ -7,7 +7,7 @@ interface ContentContainerProps {
 
 export function ContentContainer({ children, className }: ContentContainerProps) {
   return (
-    <div className={cn("flex-1 p-6", className)}>
+    <div className={cn("container-page py-6 md:py-8 lg:py-10", className)}>
       {children}
     </div>
   );

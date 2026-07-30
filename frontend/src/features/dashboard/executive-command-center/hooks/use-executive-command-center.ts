@@ -1,0 +1,28 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import type { CommandCenterResult } from "@/features/dashboard/executive-command-center/types";
+import { MockExecutiveCommandCenterService } from "@/features/dashboard/executive-command-center/services/command-center-service";
+
+export function useExecutiveCommandCenter(): CommandCenterResult {
+  const [result, setResult] = useState<CommandCenterResult>({
+    data: {
+      status: { healthScore: 0, label: "", summary: "" },
+      attention: [],
+      opportunities: [],
+      recommendations: [],
+    },
+    status: "loading",
+    error: null,
+  });
+
+  useEffect(() => {
+    const service = new MockExecutiveCommandCenterService();
+
+    service.fetch().then((res) => {
+      setResult(res);
+    });
+  }, []);
+
+  return result;
+}

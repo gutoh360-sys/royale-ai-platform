@@ -1,0 +1,111 @@
+import type { MarketplaceData, MarketplaceSummaryData } from "@/features/marketplace/types";
+
+export const mockMarketplaces: MarketplaceData[] = [
+  {
+    id: "ml",
+    name: "Mercado Livre",
+    logo: "ML",
+    status: "connected",
+    revenue: 142500.0,
+    formattedRevenue: "R$ 142,5 mil",
+    orders: 823,
+    formattedOrders: "823",
+    averageTicket: 173.15,
+    formattedAverageTicket: "R$ 173,15",
+    growth: 15.3,
+    marketShare: 42.8,
+    formattedMarketShare: "42,8%",
+    health: 96,
+    lastUpdate: "2026-07-27T09:30:00",
+  },
+  {
+    id: "shopee",
+    name: "Shopee",
+    logo: "SP",
+    status: "connected",
+    revenue: 87500.0,
+    formattedRevenue: "R$ 87,5 mil",
+    orders: 542,
+    formattedOrders: "542",
+    averageTicket: 161.44,
+    formattedAverageTicket: "R$ 161,44",
+    growth: -2.8,
+    marketShare: 26.3,
+    formattedMarketShare: "26,3%",
+    health: 82,
+    lastUpdate: "2026-07-27T09:25:00",
+  },
+  {
+    id: "amazon",
+    name: "Amazon",
+    logo: "AM",
+    status: "connected",
+    revenue: 62300.0,
+    formattedRevenue: "R$ 62,3 mil",
+    orders: 298,
+    formattedOrders: "298",
+    averageTicket: 209.06,
+    formattedAverageTicket: "R$ 209,06",
+    growth: 22.1,
+    marketShare: 18.7,
+    formattedMarketShare: "18,7%",
+    health: 65,
+    lastUpdate: "2026-07-27T09:20:00",
+  },
+  {
+    id: "magalu",
+    name: "Magalu",
+    logo: "MG",
+    status: "connected",
+    revenue: 28900.0,
+    formattedRevenue: "R$ 28,9 mil",
+    orders: 167,
+    formattedOrders: "167",
+    averageTicket: 173.05,
+    formattedAverageTicket: "R$ 173,05",
+    growth: 5.4,
+    marketShare: 8.7,
+    formattedMarketShare: "8,7%",
+    health: 48,
+    lastUpdate: "2026-07-27T09:15:00",
+  },
+  {
+    id: "tiktok",
+    name: "TikTok Shop",
+    logo: "TT",
+    status: "connected",
+    revenue: 11800.0,
+    formattedRevenue: "R$ 11,8 mil",
+    orders: 89,
+    formattedOrders: "89",
+    averageTicket: 132.58,
+    formattedAverageTicket: "R$ 132,58",
+    growth: 67.3,
+    marketShare: 3.5,
+    formattedMarketShare: "3,5%",
+    health: 55,
+    lastUpdate: "2026-07-27T09:10:00",
+  },
+];
+
+export function buildMockSummary(marketplaces: MarketplaceData[]): MarketplaceSummaryData {
+  const totalRevenue = marketplaces.reduce((s, m) => s + m.revenue, 0);
+  const totalOrders = marketplaces.reduce((s, m) => s + m.orders, 0);
+  const avgTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  const leader = [...marketplaces].sort((a, b) => b.revenue - a.revenue)[0];
+  const highestGrowth = [...marketplaces].sort((a, b) => b.growth - a.growth)[0];
+  const avgHealth = Math.round(marketplaces.reduce((s, m) => s + m.health, 0) / marketplaces.length);
+
+  return {
+    totalRevenue: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(totalRevenue),
+    totalOrders,
+    formattedTotalOrders: new Intl.NumberFormat("pt-BR").format(totalOrders),
+    averageTicket: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(avgTicket),
+    leaderName: leader?.name ?? "-",
+    highestGrowth: highestGrowth?.growth ?? 0,
+    highestGrowthName: highestGrowth?.name ?? "-",
+    averageHealth: avgHealth,
+  };
+}
+
+export const mockEmptyMarketplaces: MarketplaceData[] = [];

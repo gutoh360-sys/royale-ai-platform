@@ -1,0 +1,75 @@
+import type { ExecutiveSnapshot } from "@/features/executive-timeline/types"
+
+export const snapshotPrevious: ExecutiveSnapshot = {
+  snapshotId: "snap-prev",
+  createdAt: "2026-07-26T08:00:00.000Z",
+  marketplaceSummary: {
+    totalRevenue: "R$ 980.000",
+    totalOrders: 2800,
+    formattedTotalOrders: "2.800",
+    averageTicket: "R$ 350",
+    leaderName: "Shopee",
+    highestGrowth: 12,
+    highestGrowthName: "Mercado Livre",
+    averageHealth: 82,
+  },
+  inventorySummary: {
+    totalProducts: 100,
+    activeProducts: 95,
+    outOfStockCount: 4,
+    stockoutRiskCount: 6,
+    lowStockCount: 8,
+    overstockCount: 3,
+    slowMovingCount: 2,
+    healthyCount: 72,
+    totalSuggestedPurchaseUnits: 120,
+    estimatedSuggestedPurchaseCost: 32000,
+    idleCapitalProductCount: 5,
+    idleCapitalValue: 28000,
+    averageCoverageDays: 32,
+    criticalReplenishmentCount: 4,
+    topReplenishmentProducts: [],
+  },
+  executiveSummary: [],
+}
+
+export const snapshotCurrent: ExecutiveSnapshot = {
+  snapshotId: "snap-current",
+  createdAt: "2026-07-27T08:00:00.000Z",
+  marketplaceSummary: {
+    totalRevenue: "R$ 1.250.000",
+    totalOrders: 3200,
+    formattedTotalOrders: "3.200",
+    averageTicket: "R$ 390",
+    leaderName: "Shopee",
+    highestGrowth: 22,
+    highestGrowthName: "Mercado Livre",
+    averageHealth: 88,
+  },
+  inventorySummary: {
+    totalProducts: 100,
+    activeProducts: 95,
+    outOfStockCount: 2,
+    stockoutRiskCount: 3,
+    lowStockCount: 5,
+    overstockCount: 8,
+    slowMovingCount: 5,
+    healthyCount: 72,
+    totalSuggestedPurchaseUnits: 90,
+    estimatedSuggestedPurchaseCost: 25000,
+    idleCapitalProductCount: 13,
+    idleCapitalValue: 62000,
+    averageCoverageDays: 35,
+    criticalReplenishmentCount: 2,
+    topReplenishmentProducts: [],
+  },
+  executiveSummary: [],
+}
+
+export const snapshotIdentical: ExecutiveSnapshot = {
+  snapshotId: "snap-identical",
+  createdAt: "2026-07-27T08:00:00.000Z",
+  marketplaceSummary: { ...snapshotPrevious.marketplaceSummary },
+  inventorySummary: { ...snapshotPrevious.inventorySummary },
+  executiveSummary: [],
+}
