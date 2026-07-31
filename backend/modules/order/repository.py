@@ -11,6 +11,14 @@ class PostgresOrderRepository(IOrderRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def find_all(self, status: str | None = None) -> list[Order]:
+        stmt = select(Order)
+        if status is not None:
+            stmt = stmt.where(Order.status == status)
+        stmt = stmt.order_by(Order.created_at, Order.id)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def find_by_id(self, order_id: str) -> Order | None:
         stmt = select(Order).where(Order.id == UUID(order_id))
         result = await self._session.execute(stmt)
