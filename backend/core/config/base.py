@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     BLING_CLIENT_ID: str = ""
     BLING_CLIENT_SECRET: str = ""
+    BLING_ADMIN_USERNAME: str = ""
+    BLING_ADMIN_PASSWORD: str = ""
     BLING_REDIRECT_URI: str = ""
     BLING_API_BASE_URL: str = "https://api.bling.com.br/Api/v3"
     BLING_AUTHORIZE_URL: str = "https://bling.com.br/Api/v3/oauth/authorize"

@@ -31,6 +31,8 @@ def settings() -> Settings:
         BLING_CLIENT_ID="test-client-id",
         BLING_CLIENT_SECRET="test-client-secret",
         BLING_REDIRECT_URI="http://test/bling/callback",
+        BLING_ADMIN_USERNAME="royale-admin",
+        BLING_ADMIN_PASSWORD="test-admin-password",
         BLING_API_BASE_URL="https://api.bling.com.br/Api/v3",
         BLING_AUTHORIZE_URL="https://bling.com.br/Api/v3/oauth/authorize",
         BLING_TOKEN_URL="https://api.bling.com.br/oauth/token",
