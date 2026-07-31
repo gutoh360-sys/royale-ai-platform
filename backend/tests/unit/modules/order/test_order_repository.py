@@ -2,6 +2,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models.category import Category
@@ -99,6 +102,67 @@ async def test_save_persists_order(db_session: AsyncSession) -> None:
     assert saved.external_id == "EXT-001"
     assert saved.status == "pending"
     assert isinstance(saved.total_amount, Decimal)
+
+
+async def test_save_persists_order_with_items(db_session: AsyncSession) -> None:
+    repo = PostgresOrderRepository(db_session)
+    category = Category(id=uuid4(), bling_id="C001", name="Eletrônicos", active=True)
+    db_session.add(category)
+    await db_session.flush()
+    product = Product(
+        id=uuid4(),
+        sku="SKU-001",
+        bling_id="P001",
+        name="Produto",
+        category_id=category.id,
+        price=Decimal("10.00"),
+    )
+    db_session.add(product)
+    await db_session.flush()
+    order = _make_order(total_amount=Decimal("20.00"))
+    order.items = [
+        OrderItem(
+            product_id=product.id,
+            sku="SKU-001",
+            product_name="Produto",
+            quantity=2,
+            unit_price=Decimal("10.00"),
+            total_price=Decimal("20.00"),
+        )
+    ]
+
+    saved = await repo.save(order)
+
+    assert saved.id == order.id
+    assert len(saved.items) == 1
+    assert saved.items[0].sku == "SKU-001"
+    assert saved.items[0].quantity == 2
+    assert saved.items[0].unit_price == Decimal("10.00")
+    assert saved.items[0].total_price == Decimal("20.00")
+    assert saved.items[0].product_id == product.id
+    assert saved.items[0].created_at is not None
+
+
+async def test_save_rolls_back_when_item_product_missing(db_session: AsyncSession) -> None:
+    repo = PostgresOrderRepository(db_session)
+    order = _make_order(total_amount=Decimal("20.00"))
+    order.items = [
+        OrderItem(
+            product_id=uuid4(),
+            sku="SKU-001",
+            product_name="Produto",
+            quantity=1,
+            unit_price=Decimal("10.00"),
+            total_price=Decimal("10.00"),
+        )
+    ]
+
+    with pytest.raises(IntegrityError):
+        await repo.save(order)
+
+    await db_session.rollback()
+    remaining = await db_session.execute(select(Order))
+    assert remaining.scalars().all() == []
 
 
 async def test_update_header_preserves_fields(db_session: AsyncSession) -> None:

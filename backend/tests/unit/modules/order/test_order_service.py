@@ -75,6 +75,45 @@ async def test_list_orders_without_filter() -> None:
     assert repo.find_all_calls == [None]
 
 
+async def test_create_order_delegates_aggregate_with_items() -> None:
+    repo = InMemoryOrderRepository()
+    order_id = uuid4()
+    order = _make_order(id=order_id, total_amount=Decimal("20.00"))
+    item = OrderItem(
+        id=uuid4(),
+        order_id=order_id,
+        product_id=uuid4(),
+        sku="SKU-001",
+        product_name="Produto Teste",
+        quantity=2,
+        unit_price=Decimal("10.00"),
+        total_price=Decimal("20.00"),
+        cost=None,
+        created_at=datetime.now(UTC),
+    )
+    order.items = [item]
+    service = OrderService(repo)
+
+    saved = await service.create_order(order)
+
+    assert saved is order
+    assert repo.save_calls == [order]
+    assert len(saved.items) == 1
+    assert saved.items[0].sku == "SKU-001"
+
+
+async def test_create_order_without_items() -> None:
+    repo = InMemoryOrderRepository()
+    order = _make_order()
+    service = OrderService(repo)
+
+    saved = await service.create_order(order)
+
+    assert saved is order
+    assert saved.items == []
+    assert repo.save_calls == [order]
+
+
 async def test_list_orders_with_status() -> None:
     repo = InMemoryOrderRepository()
     repo._orders = {

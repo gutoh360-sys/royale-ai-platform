@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.database.models.order import Order
 from backend.modules.order.ports import IOrderRepository
@@ -35,8 +36,9 @@ class PostgresOrderRepository(IOrderRepository):
     async def save(self, order: Order) -> Order:
         self._session.add(order)
         await self._session.flush()
-        await self._session.refresh(order)
-        return order
+        stmt = select(Order).where(Order.id == order.id).options(selectinload(Order.items))
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
 
     async def update_status(self, order_id: str, status: str) -> None:
         stmt = select(Order).where(Order.id == UUID(order_id))

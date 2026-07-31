@@ -119,6 +119,95 @@ def test_order_create_rejects_negative_total() -> None:
         )
 
 
+def test_order_create_items_default_empty() -> None:
+    order = OrderCreate.model_validate(
+        {
+            "external_id": "EXT-001",
+            "order_number": "12345",
+            "customer_name": "Cliente Teste",
+            "total_amount": Decimal("100.00"),
+            "ordered_at": datetime.now(),
+        }
+    )
+
+    assert order.items == []
+
+
+def test_order_create_accepts_items() -> None:
+    order = OrderCreate.model_validate(
+        {
+            "external_id": "EXT-001",
+            "order_number": "12345",
+            "customer_name": "Cliente Teste",
+            "total_amount": Decimal("100.00"),
+            "ordered_at": datetime.now(),
+            "items": [
+                {
+                    "product_id": uuid4(),
+                    "sku": "SKU-001",
+                    "product_name": "Produto Teste",
+                    "quantity": 2,
+                    "unit_price": Decimal("10.00"),
+                    "total_price": Decimal("20.00"),
+                },
+                {
+                    "product_id": uuid4(),
+                    "sku": "SKU-002",
+                    "product_name": "Produto Dois",
+                    "quantity": 1,
+                    "unit_price": Decimal("5.00"),
+                    "total_price": Decimal("5.00"),
+                },
+            ],
+        }
+    )
+
+    assert len(order.items) == 2
+    assert order.items[0].sku == "SKU-001"
+    assert order.items[1].quantity == 1
+
+
+def test_order_create_rejects_invalid_item() -> None:
+    with pytest.raises(ValidationError):
+        OrderCreate.model_validate(
+            {
+                "external_id": "EXT-001",
+                "order_number": "12345",
+                "customer_name": "Cliente Teste",
+                "total_amount": Decimal("100.00"),
+                "ordered_at": datetime.now(),
+                "items": [
+                    {
+                        "product_id": uuid4(),
+                        "sku": "SKU-001",
+                        "product_name": "Produto Teste",
+                        "quantity": 0,
+                        "unit_price": Decimal("10.00"),
+                        "total_price": Decimal("0.00"),
+                    }
+                ],
+            }
+        )
+
+
+def test_order_create_excludes_server_managed_fields() -> None:
+    fields = set(OrderCreate.model_fields.keys())
+
+    assert "id" not in fields
+    assert "created_at" not in fields
+    assert "updated_at" not in fields
+    assert "last_synced_at" not in fields
+    assert "order_id" not in fields
+
+
+def test_order_item_create_excludes_server_managed_fields() -> None:
+    fields = set(OrderItemCreate.model_fields.keys())
+
+    assert "id" not in fields
+    assert "order_id" not in fields
+    assert "created_at" not in fields
+
+
 def test_order_update_partial() -> None:
     order = OrderUpdate.model_validate({"status": "completed", "customer_name": "Nome atualizado"})
 

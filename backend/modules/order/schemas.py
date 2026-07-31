@@ -45,6 +45,7 @@ class OrderCreate(BaseModel):
     payment_method: str | None = Field(None, max_length=100)
     notes: str | None = None
     ordered_at: datetime
+    items: list[OrderItemCreate] = Field(default_factory=list)
 
 
 class OrderStatusUpdate(BaseModel):

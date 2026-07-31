@@ -1,12 +1,17 @@
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.core.di import get_db_session
+from backend.database.models.category import Category
+from backend.database.models.order import Order, OrderItem
+from backend.database.models.product import Product
 
 
 @pytest_asyncio.fixture
@@ -52,6 +57,61 @@ async def _create_order(
     assert response.status_code == 201
     data: dict[str, Any] = response.json()
     return data
+
+
+def _item_payload(
+    product_id: Any,
+    sku: str = "SKU-001",
+    quantity: int = 1,
+    unit_price: str = "10.00",
+    total_price: str = "10.00",
+) -> dict[str, Any]:
+    return {
+        "product_id": str(product_id),
+        "sku": sku,
+        "product_name": "Produto Teste",
+        "quantity": quantity,
+        "unit_price": unit_price,
+        "total_price": total_price,
+    }
+
+
+def _order_payload(
+    items: list[dict[str, Any]],
+    external_id: str = "EXT-ITEMS-001",
+) -> dict[str, Any]:
+    return {
+        "external_id": external_id,
+        "marketplace": "bling",
+        "order_number": "77777",
+        "customer_name": "Cliente Teste",
+        "status": "pending",
+        "total_amount": "20.00",
+        "ordered_at": "2026-07-31T10:00:00Z",
+        "items": items,
+    }
+
+
+async def _create_product(
+    session_factory: async_sessionmaker[AsyncSession],
+    sku: str = "SKU-P-001",
+    bling_id: str = "BL-P-001",
+) -> Product:
+    async with session_factory() as session:
+        category = Category(id=uuid4(), bling_id="BL-C-001", name="Eletrônicos", active=True)
+        session.add(category)
+        await session.flush()
+        product = Product(
+            id=uuid4(),
+            sku=sku,
+            bling_id=bling_id,
+            name="Produto Teste",
+            category_id=category.id,
+            price=Decimal("10.00"),
+        )
+        session.add(product)
+        await session.commit()
+        return product
 
 
 async def test_list_orders_empty(api_client: AsyncClient) -> None:
@@ -221,3 +281,93 @@ async def test_post_continues_functional(api_client: AsyncClient) -> None:
 
     assert response.status_code == 201
     assert response.json()["external_id"] == "EXT-999"
+
+
+async def test_create_order_without_items_returns_empty_items(
+    api_client: AsyncClient,
+) -> None:
+    response = await api_client.post("/orders", json=_order_payload([]))
+
+    assert response.status_code == 201
+    assert response.json()["items"] == []
+
+
+async def test_create_order_with_item_returns_201(
+    api_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    product = await _create_product(session_factory)
+    payload = _order_payload([_item_payload(product.id)])
+
+    response = await api_client.post("/orders", json=payload)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert len(data["items"]) == 1
+    item = data["items"][0]
+    assert item["product_id"] == str(product.id)
+    assert item["sku"] == "SKU-001"
+    assert item["quantity"] == 1
+    assert item["unit_price"] == "10.00"
+    assert item["total_price"] == "10.00"
+    assert item["order_id"] == data["id"]
+
+
+async def test_create_order_multiple_items_returns_items(
+    api_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    product = await _create_product(session_factory)
+    payload = _order_payload(
+        [
+            _item_payload(product.id, sku="SKU-001", quantity=2, total_price="20.00"),
+            _item_payload(product.id, sku="SKU-002", unit_price="5.00", total_price="5.00"),
+        ]
+    )
+
+    response = await api_client.post("/orders", json=payload)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert len(data["items"]) == 2
+    assert [i["sku"] for i in data["items"]] == ["SKU-001", "SKU-002"]
+
+
+async def test_create_order_invalid_item_returns_422(api_client: AsyncClient) -> None:
+    payload = _order_payload([_item_payload(uuid4(), quantity=0)])
+
+    response = await api_client.post("/orders", json=payload)
+
+    assert response.status_code == 422
+
+
+async def test_create_order_invalid_product_returns_409(api_client: AsyncClient) -> None:
+    payload = _order_payload([_item_payload(uuid4())])
+
+    response = await api_client.post("/orders", json=payload)
+
+    assert response.status_code == 409
+
+
+async def test_create_order_rolls_back_all_on_item_failure(
+    api_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    product = await _create_product(session_factory)
+    payload = _order_payload(
+        [
+            _item_payload(product.id, sku="SKU-001"),
+            _item_payload(uuid4(), sku="SKU-INVALID"),
+        ]
+    )
+
+    response = await api_client.post("/orders", json=payload)
+
+    assert response.status_code == 409
+
+    async with session_factory() as session:
+        order_count = await session.scalar(select(func.count()).select_from(Order))
+        item_count = await session.scalar(select(func.count()).select_from(OrderItem))
+
+    assert order_count == 0
+    assert item_count == 0

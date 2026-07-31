@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 
 from backend.core.di import get_order_service
-from backend.database.models.order import Order
+from backend.database.models.order import Order, OrderItem
 from backend.modules.order.schemas import (
     OrderCreate,
     OrderResponse,
@@ -65,8 +65,26 @@ async def create_order(
         payment_method=payload.payment_method,
         notes=payload.notes,
         ordered_at=payload.ordered_at,
+        items=[
+            OrderItem(
+                product_id=item.product_id,
+                sku=item.sku,
+                product_name=item.product_name,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+                cost=item.cost,
+            )
+            for item in payload.items
+        ],
     )
-    return await service.create_order(order)
+    try:
+        return await service.create_order(order)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Order cannot be created because it violates a data constraint",
+        ) from exc
 
 
 @router.put("/{order_id}", response_model=OrderResponse)
