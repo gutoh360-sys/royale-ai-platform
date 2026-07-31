@@ -15,7 +15,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Royale AI Platform",
+  title: {
+    default: "Royale.Ecommerce",
+    template: "%s | Royale.Ecommerce",
+  },
   description: "AI-powered e-commerce management platform",
   icons: {
     icon: [
