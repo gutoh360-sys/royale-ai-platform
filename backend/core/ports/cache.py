@@ -14,3 +14,6 @@ class ICacheService(ABC):
 
     @abstractmethod
     async def exists(self, key: str) -> bool: ...
+
+    @abstractmethod
+    async def consume(self, key: str) -> str | None: ...

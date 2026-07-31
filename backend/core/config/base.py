@@ -28,6 +28,22 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 60
 
+    BLING_CLIENT_ID: str = ""
+    BLING_CLIENT_SECRET: str = ""
+    BLING_REDIRECT_URI: str = ""
+    BLING_API_BASE_URL: str = "https://api.bling.com.br/Api/v3"
+    BLING_AUTHORIZE_URL: str = "https://bling.com.br/Api/v3/oauth/authorize"
+    BLING_TOKEN_URL: str = "https://api.bling.com.br/oauth/token"
+    BLING_REVOKE_URL: str = "https://api.bling.com.br/oauth/revoke"
+    BLING_REQUEST_TIMEOUT_SECONDS: float = 30.0
+    BLING_OAUTH_STATE_TTL_SECONDS: int = 600
+    BLING_ACCESS_TOKEN_MARGIN_SECONDS: int = 60
+    BLING_REFRESH_TOKEN_LIFETIME_DAYS: int = 30
+    BLING_MAX_REQUESTS_PER_SECOND: float = 3.0
+    BLING_MAX_RETRIES: int = 1
+    BLING_MAX_BACKOFF_SECONDS: float = 5.0
+    BLING_TEST_ENDPOINT: str = "/produtos?limite=1"
+
     AI_GATEWAY_API_KEY: str = ""
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o"

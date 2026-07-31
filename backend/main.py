@@ -14,6 +14,7 @@ from backend.core.middleware import (
 )
 from backend.core.observability import setup_opentelemetry, setup_prometheus
 from backend.modules.catalog.router import router as catalog_router
+from backend.modules.integration.router import router as integration_router
 from backend.modules.order.router import router as order_router
 
 
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(catalog_router)
     app.include_router(order_router)
+    app.include_router(integration_router)
 
     return app
 

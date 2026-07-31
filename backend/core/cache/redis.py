@@ -5,6 +5,15 @@ from redis.asyncio import Redis
 from backend.core.config.base import Settings
 from backend.core.ports.cache import ICacheService
 
+_GETDEL_SCRIPT = """
+local value = redis.call('GET', KEYS[1])
+if value then
+  redis.call('DEL', KEYS[1])
+  return value
+end
+return false
+"""
+
 
 class RedisCacheService(ICacheService):
     def __init__(self, settings: Settings):
@@ -24,3 +33,12 @@ class RedisCacheService(ICacheService):
 
     async def exists(self, key: str) -> bool:
         return await self._client.exists(key) > 0
+
+    async def consume(self, key: str) -> str | None:
+        value = await self._client.eval(_GETDEL_SCRIPT, 1, key)
+        if value is None or value is False:
+            return None
+        return str(value)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
