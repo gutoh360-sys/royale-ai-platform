@@ -18,3 +18,6 @@ class IOrderRepository(ABC):
 
     @abstractmethod
     async def update_status(self, order_id: str, status: str) -> None: ...
+
+    @abstractmethod
+    async def delete(self, order_id: str) -> bool: ...

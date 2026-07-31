@@ -371,3 +371,78 @@ async def test_create_order_rolls_back_all_on_item_failure(
 
     assert order_count == 0
     assert item_count == 0
+
+
+async def test_delete_order_returns_204_no_body(api_client: AsyncClient) -> None:
+    created = await _create_order(api_client)
+
+    response = await api_client.delete(f"/orders/{created['id']}")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+async def test_delete_missing_order_returns_404(api_client: AsyncClient) -> None:
+    response = await api_client.delete(f"/orders/{uuid4()}")
+
+    assert response.status_code == 404
+
+
+async def test_delete_order_with_items_returns_204_and_removes_items(
+    api_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    product = await _create_product(session_factory)
+    response = await api_client.post("/orders", json=_order_payload([_item_payload(product.id)]))
+    assert response.status_code == 201
+    order_id = response.json()["id"]
+
+    delete_response = await api_client.delete(f"/orders/{order_id}")
+
+    assert delete_response.status_code == 204
+    assert delete_response.content == b""
+
+    async with session_factory() as session:
+        order_count = await session.scalar(select(func.count()).select_from(Order))
+        item_count = await session.scalar(select(func.count()).select_from(OrderItem))
+    assert order_count == 0
+    assert item_count == 0
+
+
+async def test_delete_does_not_affect_other_orders(
+    api_client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    product = await _create_product(session_factory)
+    first = await api_client.post(
+        "/orders", json=_order_payload([_item_payload(product.id)], external_id="EXT-DEL-001")
+    )
+    assert first.status_code == 201
+    second = await api_client.post(
+        "/orders", json=_order_payload([_item_payload(product.id)], external_id="EXT-DEL-002")
+    )
+    assert second.status_code == 201
+    first_order = first.json()
+    second_order = second.json()
+
+    delete_response = await api_client.delete(f"/orders/{first_order['id']}")
+
+    assert delete_response.status_code == 204
+    async with session_factory() as session:
+        remaining_orders = (await session.scalars(select(Order))).all()
+        remaining_items = (await session.scalars(select(OrderItem))).all()
+    assert len(remaining_orders) == 1
+    assert str(remaining_orders[0].id) == second_order["id"]
+    assert len(remaining_items) == 1
+    assert str(remaining_items[0].order_id) == second_order["id"]
+
+
+async def test_get_after_delete_returns_404(api_client: AsyncClient) -> None:
+    created = await _create_order(api_client)
+
+    delete_response = await api_client.delete(f"/orders/{created['id']}")
+    assert delete_response.status_code == 204
+
+    get_response = await api_client.get(f"/orders/{created['id']}")
+
+    assert get_response.status_code == 404

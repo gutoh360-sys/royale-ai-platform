@@ -14,6 +14,7 @@ class InMemoryOrderRepository(IOrderRepository):
         self.find_all_calls: list[str | None] = []
         self.find_by_id_calls: list[str] = []
         self.save_calls: list[Order] = []
+        self.delete_calls: list[str] = []
 
     async def find_all(self, status: str | None = None) -> list[Order]:
         self.find_all_calls.append(status)
@@ -44,6 +45,14 @@ class InMemoryOrderRepository(IOrderRepository):
         order = await self.find_by_id(order_id)
         if order is not None:
             order.status = status
+
+    async def delete(self, order_id: str) -> bool:
+        self.delete_calls.append(order_id)
+        for key in list(self._orders.keys()):
+            if str(key) == order_id:
+                del self._orders[key]
+                return True
+        return False
 
 
 def _make_order(**overrides: Any) -> Order:
@@ -223,3 +232,54 @@ async def test_update_order_calls_repository() -> None:
     assert len(repo.save_calls) == 1
     assert updated is not None
     assert updated.status == "completed"
+
+
+async def test_delete_order_returns_true_when_deleted() -> None:
+    repo = InMemoryOrderRepository()
+    order_id = uuid4()
+    repo._orders = {order_id: _make_order(id=order_id)}
+    service = OrderService(repo)
+
+    deleted = await service.delete_order(str(order_id))
+
+    assert deleted is True
+    assert str(order_id) not in {str(key) for key in repo._orders}
+
+
+async def test_delete_order_returns_false_when_missing() -> None:
+    repo = InMemoryOrderRepository()
+    missing_id = str(uuid4())
+    service = OrderService(repo)
+
+    deleted = await service.delete_order(missing_id)
+
+    assert deleted is False
+    assert repo.delete_calls == [missing_id]
+
+
+async def test_delete_order_delegates_once() -> None:
+    repo = InMemoryOrderRepository()
+    order_id = uuid4()
+    repo._orders = {order_id: _make_order(id=order_id)}
+    service = OrderService(repo)
+
+    await service.delete_order(str(order_id))
+
+    assert repo.delete_calls == [str(order_id)]
+
+
+async def test_delete_order_does_not_touch_other_orders() -> None:
+    repo = InMemoryOrderRepository()
+    delete_id = uuid4()
+    keep_id = uuid4()
+    repo._orders = {
+        delete_id: _make_order(id=delete_id, external_id="EXT-001"),
+        keep_id: _make_order(id=keep_id, external_id="EXT-002"),
+    }
+    service = OrderService(repo)
+
+    deleted = await service.delete_order(str(delete_id))
+
+    assert deleted is True
+    assert str(delete_id) not in {str(key) for key in repo._orders}
+    assert str(keep_id) in {str(key) for key in repo._orders}

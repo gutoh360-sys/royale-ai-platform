@@ -30,3 +30,6 @@ class OrderService:
 
     async def update_order_status(self, order_id: str, status: str) -> None:
         await self._order_repo.update_status(order_id, status)
+
+    async def delete_order(self, order_id: str) -> bool:
+        return await self._order_repo.delete(order_id)

@@ -1,6 +1,7 @@
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -47,3 +48,9 @@ class PostgresOrderRepository(IOrderRepository):
         if order is not None:
             order.status = status
             await self._session.flush()
+
+    async def delete(self, order_id: str) -> bool:
+        stmt = delete(Order).where(Order.id == UUID(order_id))
+        result = cast(CursorResult[Any], await self._session.execute(stmt))
+        await self._session.flush()
+        return result.rowcount > 0

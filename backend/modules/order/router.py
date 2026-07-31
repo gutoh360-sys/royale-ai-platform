@@ -123,3 +123,13 @@ async def update_order_status(
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return updated
+
+
+@router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_order(
+    order_id: str,
+    service: OrderService = Depends(get_order_service),
+) -> None:
+    deleted = await service.delete_order(order_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
