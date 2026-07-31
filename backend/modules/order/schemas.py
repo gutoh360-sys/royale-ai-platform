@@ -20,6 +20,16 @@ class OrderItemResponse(BaseModel):
     created_at: datetime
 
 
+class OrderItemCreate(BaseModel):
+    product_id: UUID
+    sku: str = Field(..., max_length=50)
+    product_name: str = Field(..., max_length=200)
+    quantity: int = Field(..., gt=0)
+    unit_price: Decimal = Field(..., decimal_places=2, ge=0)
+    total_price: Decimal = Field(..., decimal_places=2, ge=0)
+    cost: Decimal | None = Field(None, decimal_places=2, ge=0)
+
+
 class OrderCreate(BaseModel):
     external_id: str = Field(..., max_length=50)
     marketplace: str = Field("bling", max_length=50)
@@ -39,6 +49,23 @@ class OrderCreate(BaseModel):
 
 class OrderStatusUpdate(BaseModel):
     status: str = Field(..., max_length=50)
+
+
+class OrderUpdate(BaseModel):
+    external_id: str | None = Field(None, max_length=50)
+    marketplace: str | None = Field(None, max_length=50)
+    order_number: str | None = Field(None, max_length=50)
+    customer_name: str | None = Field(None, max_length=200)
+    customer_document: str | None = Field(None, max_length=20)
+    customer_email: str | None = Field(None, max_length=200)
+    customer_phone: str | None = Field(None, max_length=20)
+    status: str | None = Field(None, max_length=50)
+    total_amount: Decimal | None = Field(None, decimal_places=2, ge=0)
+    shipping_amount: Decimal | None = Field(None, decimal_places=2, ge=0)
+    discount_amount: Decimal | None = Field(None, decimal_places=2, ge=0)
+    payment_method: str | None = Field(None, max_length=100)
+    notes: str | None = None
+    ordered_at: datetime | None = None
 
 
 class OrderResponse(BaseModel):

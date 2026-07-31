@@ -65,6 +65,14 @@ class CategoryCreate(BaseModel):
     active: bool = True
 
 
+class CategoryUpdate(BaseModel):
+    bling_id: str | None = Field(None, max_length=50)
+    name: str | None = Field(None, max_length=200)
+    parent_id: UUID | None = None
+    path: str | None = Field(None, max_length=500)
+    active: bool | None = None
+
+
 class CategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
