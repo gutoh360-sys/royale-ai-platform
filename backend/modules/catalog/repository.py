@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models.category import Category
@@ -88,6 +88,11 @@ class PostgresCategoryRepository(ICategoryRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def find_all(self) -> list[Category]:
+        stmt = select(Category)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def find_by_id(self, category_id: str) -> Category | None:
         stmt = select(Category).where(Category.id == UUID(category_id))
         result = await self._session.execute(stmt)
@@ -98,3 +103,8 @@ class PostgresCategoryRepository(ICategoryRepository):
         await self._session.flush()
         await self._session.refresh(category)
         return category
+
+    async def delete(self, category_id: str) -> None:
+        stmt = delete(Category).where(Category.id == UUID(category_id))
+        await self._session.execute(stmt)
+        await self._session.flush()

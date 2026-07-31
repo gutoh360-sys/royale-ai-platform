@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 
 from backend.core.di import get_category_service, get_product_service
 from backend.database.models.category import Category
@@ -6,6 +7,7 @@ from backend.database.models.product import Product
 from backend.modules.catalog.schemas import (
     CategoryCreate,
     CategoryResponse,
+    CategoryUpdate,
     ProductCreate,
     ProductResponse,
     ProductUpdate,
@@ -81,11 +83,18 @@ async def delete_product(
 categories_router = APIRouter(prefix="/categories", tags=["categories"])
 
 
+@categories_router.get("", response_model=list[CategoryResponse])
+async def list_categories(
+    service: CategoryService = Depends(get_category_service),
+) -> list[Category]:
+    return await service.list_categories()
+
+
 @categories_router.get("/{category_id}", response_model=CategoryResponse)
 async def get_category(
     category_id: str,
     service: CategoryService = Depends(get_category_service),
-) -> CategoryResponse:
+) -> Category:
     category = await service.get_category(category_id)
     if category is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
@@ -96,7 +105,7 @@ async def get_category(
 async def create_category(
     payload: CategoryCreate,
     service: CategoryService = Depends(get_category_service),
-) -> CategoryResponse:
+) -> Category:
     category = Category(
         bling_id=payload.bling_id,
         name=payload.name,
@@ -105,6 +114,41 @@ async def create_category(
         active=payload.active,
     )
     return await service.create_category(category)
+
+
+@categories_router.put("/{category_id}", response_model=CategoryResponse)
+async def update_category(
+    category_id: str,
+    payload: CategoryUpdate,
+    service: CategoryService = Depends(get_category_service),
+) -> Category:
+    existing = await service.get_category(category_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(existing, key, value)
+    updated = await service.update_category(category_id, data)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    return updated
+
+
+@categories_router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_category(
+    category_id: str,
+    service: CategoryService = Depends(get_category_service),
+) -> None:
+    existing = await service.get_category(category_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    try:
+        await service.delete_category(category_id)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Category cannot be deleted because it has related records",
+        ) from exc
 
 
 router = APIRouter()

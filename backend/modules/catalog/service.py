@@ -1,5 +1,6 @@
 from typing import Any
 
+from backend.database.models.category import Category
 from backend.modules.catalog.ports import ICategoryRepository, IProductRepository
 
 
@@ -35,8 +36,22 @@ class CategoryService:
     def __init__(self, category_repo: ICategoryRepository) -> None:
         self._category_repo = category_repo
 
-    async def get_category(self, category_id: str) -> Any | None:
+    async def list_categories(self) -> list[Category]:
+        return await self._category_repo.find_all()
+
+    async def get_category(self, category_id: str) -> Category | None:
         return await self._category_repo.find_by_id(category_id)
 
-    async def create_category(self, category: Any) -> Any:
+    async def create_category(self, category: Category) -> Category:
         return await self._category_repo.save(category)
+
+    async def update_category(self, category_id: str, data: dict[str, Any]) -> Category | None:
+        category = await self._category_repo.find_by_id(category_id)
+        if category is None:
+            return None
+        for key, value in data.items():
+            setattr(category, key, value)
+        return await self._category_repo.save(category)
+
+    async def delete_category(self, category_id: str) -> None:
+        await self._category_repo.delete(category_id)
