@@ -4,7 +4,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -28,6 +28,14 @@ class TokenResponse:
 def redact_url(url: str) -> str:
     parts = urlsplit(url)
     return f"{parts.scheme}://{parts.netloc}{parts.path}"
+
+
+def _with_query(url: str, params: dict[str, str | int]) -> str:
+    parts = urlsplit(url)
+    query = urlencode(params)
+    if parts.query:
+        query = parts.query + "&" + query
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 class BlingApiClient:
@@ -118,8 +126,11 @@ class BlingApiClient:
         self,
         path: str,
         token_provider: Callable[[], Awaitable[str]],
+        params: dict[str, str | int] | None = None,
     ) -> httpx.Response:
         url = self._settings.BLING_API_BASE_URL + path
+        if params:
+            url = _with_query(url, params)
         transient_attempts = 0
         refreshed = False
         while True:
@@ -155,6 +166,79 @@ class BlingApiClient:
 
     async def _wait_backoff(self, attempt: int) -> None:
         await asyncio.sleep(min(0.5 * attempt, self._settings.BLING_MAX_BACKOFF_SECONDS))
+
+    async def list_resource(
+        self,
+        path: str,
+        token_provider: Callable[[], Awaitable[str]],
+        params: dict[str, str | int],
+        max_pages: int | None = None,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            query = dict(params)
+            query["pagina"] = page
+            response = await self.get_authenticated(path, token_provider, query)
+            if response.status_code != 200:
+                raise ApiError(f"list resource failed with status {response.status_code}")
+            body = response.json()
+            payload = body.get("data")
+            if isinstance(payload, list):
+                items.extend(cast(list[dict[str, Any]], payload))
+            elif isinstance(payload, dict):
+                items.append(payload)
+            asked_total_pages = (body.get("response") or {}).get("paginacao") or {}
+            total_pages = (
+                int(asked_total_pages["totalPaginas"])
+                if asked_total_pages.get("totalPaginas") is not None
+                else 1
+            )
+            if max_pages is not None and page >= max_pages:
+                break
+            if page >= total_pages:
+                break
+            page += 1
+        return items
+
+    async def fetch_products(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        page_size: int = 100,
+        max_pages: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if max_pages is None:
+            max_pages = self._settings.BLING_PRODUCT_SYNC_MAX_PAGES
+        return await self.list_resource(
+            "/produtos",
+            token_provider,
+            {"limite": page_size, "criterio": 2, "tipo": "T"},
+            max_pages=max_pages,
+        )
+
+    async def fetch_categories(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+    ) -> list[dict[str, Any]]:
+        return await self.list_resource(
+            "/categorias/produtos", token_provider, {"limite": 100}
+        )
+
+    async def fetch_orders(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        page_size: int = 100,
+        data_inicial: str | None = None,
+        data_final: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str | int] = {"limite": page_size}
+        if data_inicial:
+            params["dataInicial"] = data_inicial
+        if data_final:
+            params["dataFinal"] = data_final
+        return await self.list_resource("/pedidos/vendas", token_provider, params)
 
     @staticmethod
     def _parse_token_response(payload: dict[str, Any]) -> TokenResponse:

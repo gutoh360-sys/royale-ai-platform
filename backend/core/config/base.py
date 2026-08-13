@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     BLING_REDIRECT_URI: str = ""
     BLING_API_BASE_URL: str = "https://api.bling.com.br/Api/v3"
     BLING_AUTHORIZE_URL: str = "https://bling.com.br/Api/v3/oauth/authorize"
-    BLING_TOKEN_URL: str = "https://api.bling.com.br/oauth/token"
+    BLING_TOKEN_URL: str = "https://api.bling.com.br/Api/v3/oauth/token"
     BLING_REVOKE_URL: str = "https://api.bling.com.br/oauth/revoke"
     BLING_REQUEST_TIMEOUT_SECONDS: float = 30.0
     BLING_OAUTH_STATE_TTL_SECONDS: int = 600
@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     BLING_MAX_RETRIES: int = 1
     BLING_MAX_BACKOFF_SECONDS: float = 5.0
     BLING_TEST_ENDPOINT: str = "/produtos?limite=1"
+    BLING_SYNC_PAGE_SIZE: int = 100
+    BLING_PRODUCT_SYNC_MAX_PAGES: int = 5
+    BLING_ORDER_SYNC_DAYS_BACK: int = 7
 
     AI_GATEWAY_API_KEY: str = ""
     OPENAI_API_KEY: str | None = None

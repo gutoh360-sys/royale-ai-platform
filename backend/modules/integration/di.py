@@ -15,6 +15,12 @@ from backend.modules.integration.ports import IBlingConnectionRepository
 from backend.modules.integration.repository import PostgresIntegrationConnectionRepository
 from backend.modules.integration.service import IntegrationConnectionService
 from backend.modules.integration.state import OAuthStateService
+from backend.modules.integration.sync_repository import (
+    ISyncLogRepository,
+    PostgresSyncLogRepository,
+    SyncDataRepository,
+)
+from backend.modules.integration.sync_service import BlingSyncService
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -90,4 +96,32 @@ def get_integration_connection_service(
 ) -> IntegrationConnectionService:
     return IntegrationConnectionService(
         repo=repo, state=state, client=client, crypto=crypto, settings=settings
+    )
+
+
+async def get_sync_log_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> ISyncLogRepository:
+    return PostgresSyncLogRepository(session)
+
+
+async def get_sync_data_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> SyncDataRepository:
+    return SyncDataRepository(session)
+
+
+async def get_bling_sync_service(
+    client: BlingApiClient = Depends(get_bling_api_client),
+    connection_service: IntegrationConnectionService = Depends(get_integration_connection_service),
+    sync_log_repo: ISyncLogRepository = Depends(get_sync_log_repository),
+    data_repo: SyncDataRepository = Depends(get_sync_data_repository),
+    settings: Settings = Depends(get_settings),
+) -> BlingSyncService:
+    return BlingSyncService(
+        client=client,
+        token_provider=connection_service.get_valid_access_token,
+        sync_log_repo=sync_log_repo,
+        data_repo=data_repo,
+        settings=settings,
     )

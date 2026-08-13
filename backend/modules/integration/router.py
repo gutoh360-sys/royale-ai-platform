@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.core.security.deps import require_admin_auth
-from backend.modules.integration.di import get_integration_connection_service
+from backend.modules.integration.di import (
+    get_bling_sync_service,
+    get_integration_connection_service,
+)
 from backend.modules.integration.errors import (
     OAuthExchangeError,
     OAuthPermanentError,
@@ -13,8 +16,10 @@ from backend.modules.integration.schemas import (
     CallbackResponse,
     ConnectionStatusResponse,
     ConnectionTestResponse,
+    SyncTriggerResponse,
 )
 from backend.modules.integration.service import IntegrationConnectionService
+from backend.modules.integration.sync_service import BlingSyncService
 
 router = APIRouter(prefix="/integrations/bling", tags=["integrations"])
 
@@ -108,3 +113,33 @@ async def test_connection(
 ) -> ConnectionTestResponse:
     result = await service.test_connection()
     return ConnectionTestResponse(status=result.status, detail=result.detail)
+
+
+@router.post(
+    "/sync/{entity}",
+    response_model=SyncTriggerResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def trigger_sync(
+    entity: str,
+    service: BlingSyncService = Depends(get_bling_sync_service),
+) -> SyncTriggerResponse:
+    if entity not in ("products", "orders"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="entity must be one of: products, orders",
+        )
+    try:
+        result = await service.sync(entity=entity)
+    except OAuthPermanentError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return SyncTriggerResponse(
+        entity=result.entity,
+        sync_type=result.sync_type,
+        status=result.status,
+        items_processed=result.items_processed,
+        items_created=result.items_created,
+        items_updated=result.items_updated,
+        items_failed=result.items_failed,
+        error_message=result.error_message,
+    )

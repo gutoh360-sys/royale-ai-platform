@@ -23,3 +23,14 @@ class ConnectionStatusResponse(BaseModel):
 class ConnectionTestResponse(BaseModel):
     status: str
     detail: str
+
+
+class SyncTriggerResponse(BaseModel):
+    entity: str
+    sync_type: str
+    status: str
+    items_processed: int
+    items_created: int
+    items_updated: int
+    items_failed: int
+    error_message: str | None = None
