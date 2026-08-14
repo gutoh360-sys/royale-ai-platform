@@ -184,19 +184,19 @@ class BlingApiClient:
                 raise ApiError(f"list resource failed with status {response.status_code}")
             body = response.json()
             payload = body.get("data")
+            page_item_count = 0
             if isinstance(payload, list):
-                items.extend(cast(list[dict[str, Any]], payload))
+                page_items = cast(list[dict[str, Any]], payload)
+                items.extend(page_items)
+                page_item_count = len(page_items)
             elif isinstance(payload, dict):
                 items.append(payload)
-            asked_total_pages = (body.get("response") or {}).get("paginacao") or {}
-            total_pages = (
-                int(asked_total_pages["totalPaginas"])
-                if asked_total_pages.get("totalPaginas") is not None
-                else 1
-            )
+                page_item_count = 1
             if max_pages is not None and page >= max_pages:
                 break
-            if page >= total_pages:
+            if page_item_count == 0:
+                break
+            if page_item_count != int(params.get("limite", 100)):
                 break
             page += 1
         return items

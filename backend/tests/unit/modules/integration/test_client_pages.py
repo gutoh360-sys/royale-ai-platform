@@ -22,35 +22,87 @@ async def _provider() -> str:
     return "jwt-access"
 
 
-def _page(items: list[dict[str, Any]], page: int, total_pages: int) -> dict[str, Any]:
-    return {
-        "data": items,
-        "response": {
-            "paginacao": {
-                "pagina": page,
-                "limite": 100,
-                "totalPaginas": total_pages,
-                "totalRegistros": 50,
-            }
-        },
-    }
+def _page(items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"data": items}
 
 
-async def test_list_resource_accumulates_pages(settings: Settings) -> None:
+async def test_list_resource_fetches_next_page_after_full_page(settings: Settings) -> None:
     pages: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         page = request.url.params["pagina"]
         pages.append(page)
         if page == "1":
-            return httpx.Response(200, json=_page([{"id": 1}, {"id": 2}], 1, 2))
-        return httpx.Response(200, json=_page([{"id": 3}], 2, 2))
+            return httpx.Response(200, json=_page([{"id": item} for item in range(100)]))
+        return httpx.Response(200, json=_page([{"id": 100}]))
 
     client = _make_client(settings, handler)
     items = await client.list_resource("/categorias/produtos", _provider, {"limite": 100})
 
-    assert items == [{"id": 1}, {"id": 2}, {"id": 3}]
+    assert len(items) == 101
     assert pages == ["1", "2"]
+
+
+async def test_list_resource_stops_after_short_page(settings: Settings) -> None:
+    pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        pages.append(request.url.params["pagina"])
+        return httpx.Response(200, json=_page([{"id": item} for item in range(99)]))
+
+    client = _make_client(settings, handler)
+    items = await client.list_resource("/produtos", _provider, {"limite": 100})
+
+    assert len(items) == 99
+    assert pages == ["1"]
+
+
+async def test_list_resource_stops_after_empty_page(settings: Settings) -> None:
+    pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = request.url.params["pagina"]
+        pages.append(page)
+        items = [{"id": item} for item in range(100)] if page == "1" else []
+        return httpx.Response(200, json=_page(items))
+
+    client = _make_client(settings, handler)
+    items = await client.list_resource("/produtos", _provider, {"limite": 100})
+
+    assert len(items) == 100
+    assert pages == ["1", "2"]
+
+
+async def test_list_resource_empty_page_stops_with_zero_limit(settings: Settings) -> None:
+    pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        pages.append(request.url.params["pagina"])
+        return httpx.Response(200, json=_page([]))
+
+    client = _make_client(settings, handler)
+    items = await client.list_resource(
+        "/produtos", _provider, {"limite": 0}, max_pages=2
+    )
+
+    assert items == []
+    assert pages == ["1"]
+
+
+async def test_list_resource_stops_after_oversized_page(settings: Settings) -> None:
+    pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        pages.append(request.url.params["pagina"])
+        return httpx.Response(200, json=_page([{"id": item} for item in range(101)]))
+
+    client = _make_client(settings, handler)
+    items = await client.list_resource(
+        "/produtos", _provider, {"limite": 100}, max_pages=2
+    )
+
+    assert len(items) == 101
+    assert pages == ["1"]
 
 
 async def test_list_resource_respects_max_pages(settings: Settings) -> None:
@@ -59,16 +111,14 @@ async def test_list_resource_respects_max_pages(settings: Settings) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         page = request.url.params["pagina"]
         pages.append(page)
-        if page == "1":
-            return httpx.Response(200, json=_page([{"id": 1}, {"id": 2}], 1, 5))
-        return httpx.Response(200, json=_page([{"id": 3}], int(page), 5))
+        return httpx.Response(200, json=_page([{"id": item} for item in range(100)]))
 
     client = _make_client(settings, handler)
     items = await client.list_resource(
         "/produtos", _provider, {"limite": 100}, max_pages=2
     )
 
-    assert items == [{"id": 1}, {"id": 2}, {"id": 3}]
+    assert len(items) == 200
     assert pages == ["1", "2"]
 
 
@@ -88,7 +138,7 @@ async def test_fetch_products_sends_query_params(settings: Settings) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["auth"] = request.headers.get("Authorization")
-        return httpx.Response(200, json=_page([{"id": 1}], 1, 1))
+        return httpx.Response(200, json=_page([{"id": 1}]))
 
     client = _make_client(settings, handler)
     items = await client.fetch_products(_provider, page_size=50)
@@ -101,21 +151,35 @@ async def test_fetch_products_sends_query_params(settings: Settings) -> None:
     assert captured["auth"] == "Bearer jwt-access"
 
 
+async def test_fetch_products_uses_requested_page_size_to_continue(settings: Settings) -> None:
+    pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = request.url.params["pagina"]
+        pages.append(page)
+        count = 50 if page == "1" else 1
+        return httpx.Response(200, json=_page([{"id": item} for item in range(count)]))
+
+    client = _make_client(settings, handler)
+    items = await client.fetch_products(_provider, page_size=50, max_pages=3)
+
+    assert len(items) == 51
+    assert pages == ["1", "2"]
+
+
 async def test_fetch_products_caps_pages_at_setting_default(settings: Settings) -> None:
     pages: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         page = request.url.params["pagina"]
         pages.append(page)
-        if page == "1":
-            return httpx.Response(200, json=_page([{"id": 1}], 1, 10))
-        return httpx.Response(200, json=_page([{"id": int(page)}], int(page), 10))
+        return httpx.Response(200, json=_page([{"id": item} for item in range(100)]))
 
     settings.BLING_PRODUCT_SYNC_MAX_PAGES = 3
     client = _make_client(settings, handler)
     items = await client.fetch_products(_provider, page_size=100)
 
-    assert len(items) == 3
+    assert len(items) == 300
     assert pages == ["1", "2", "3"]
 
 
@@ -124,7 +188,7 @@ async def test_fetch_orders_passes_date_filters(settings: Settings) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        return httpx.Response(200, json=_page([], 1, 1))
+        return httpx.Response(200, json=_page([]))
 
     client = _make_client(settings, handler)
     await client.fetch_orders(_provider, data_inicial="2026-01-01", data_final="2026-01-31")
