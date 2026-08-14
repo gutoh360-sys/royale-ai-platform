@@ -41,7 +41,7 @@ def _products_payload() -> dict[str, Any]:
                 "preco": 15.00,
             },
             {"id": 3, "codigo": "SKU-003", "nome": "Sem Categoria"},
-            {"id": 4, "codigo": "", "nome": "Sem SKU"},
+            {"id": None, "codigo": "SKU-004", "nome": "Sem ID"},
         ],
         "response": {"paginacao": {"pagina": 1, "limite": 100, "totalPaginas": 1}},
     }
@@ -116,6 +116,56 @@ async def test_sync_products_creates_and_maps(
     assert log.status == "completed"
     assert log.items_created == 3
     assert log.items_failed == 1
+
+
+async def test_sync_products_generates_fallback_sku_and_name(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    payload = {
+        "data": [{"id": 1818520548, "codigo": "", "nome": "", "preco": 0}],
+        "response": {"paginacao": {"pagina": 1, "limite": 100, "totalPaginas": 1}},
+    }
+    client = _make_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+
+    result = await service.sync_products(sync_type="full")
+    await db_session.commit()
+
+    assert result.items_processed == 1
+    assert result.items_created == 1
+    assert result.items_failed == 0
+    product = await db_session.scalar(
+        select(Product).where(Product.bling_id == "1818520548")
+    )
+    assert product is not None
+    assert product.sku == "BLING-1818520548"
+    assert product.name == "Produto sem descrição - 1818520548"
+    assert float(product.price) == 0
+
+
+async def test_sync_products_preserves_existing_sku_and_name_when_source_is_empty(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    payload = {
+        "data": [{"id": 99, "codigo": "SKU-099", "nome": "Produto Existente"}],
+        "response": {"paginacao": {"pagina": 1, "limite": 100, "totalPaginas": 1}},
+    }
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+    await service.sync_products(sync_type="full")
+    await db_session.commit()
+
+    payload["data"] = [{"id": 99, "codigo": "", "nome": ""}]
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+    result = await service.sync_products(sync_type="full")
+    await db_session.commit()
+
+    assert result.items_updated == 1
+    product = await db_session.scalar(select(Product).where(Product.bling_id == "99"))
+    assert product is not None
+    assert product.sku == "SKU-099"
+    assert product.name == "Produto Existente"
 
 
 async def test_sync_products_reuses_uncategorized_category(

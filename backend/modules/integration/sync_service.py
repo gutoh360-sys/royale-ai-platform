@@ -156,11 +156,12 @@ class BlingSyncService:
         )
 
     async def _upsert_product(self, raw: dict[str, Any]) -> str:
-        bling_id = str(raw.get("id"))
-        sku = str(raw.get("codigo") or "").strip()
-        name = str(raw.get("nome") or "").strip()
-        if not bling_id or not sku or not name:
-            raise ValueError("product is missing id, codigo or nome")
+        bling_id = str(raw.get("id") or "").strip()
+        sku = str(raw.get("codigo") or "").strip() or f"BLING-{bling_id}"
+        source_name = str(raw.get("nome") or "").strip()
+        name = source_name or f"Produto sem descrição - {bling_id}"
+        if not bling_id:
+            raise ValueError("product is missing id")
 
         category = await self._category_for(raw)
         if category is None:
@@ -180,7 +181,9 @@ class BlingSyncService:
                 product = Product(bling_id=bling_id, sku=sku, name=name)
                 action = "created"
 
-        product.name = name
+        if not product.sku:
+            product.sku = sku
+        product.name = source_name or product.name or name
         product.description = raw.get("descricao") or product.description
         product.ean = self._clean_ean(raw.get("gtin")) or product.ean
         product.category_id = category.id
