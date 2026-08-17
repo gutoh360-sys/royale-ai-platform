@@ -36,7 +36,12 @@ class SyncResult:
     items_created: int
     items_updated: int
     items_failed: int
+    items_skipped: int = 0
     error_message: str | None = None
+
+
+class ProductIncompleteError(Exception):
+    """Raised when a Bling product is missing required cadastral fields."""
 
 
 class BlingSyncService:
@@ -105,7 +110,7 @@ class BlingSyncService:
     ) -> SyncResult:
         log = SyncLog(sync_type=sync_type, entity=entity)
         await self._sync_log_repo.create(log)
-        processed = created = updated = failed = 0
+        processed = created = updated = failed = skipped = 0
         try:
             items = await fetch()
         except Exception as exc:
@@ -122,12 +127,17 @@ class BlingSyncService:
                 items_created=0,
                 items_updated=0,
                 items_failed=0,
+                items_skipped=0,
                 error_message=str(exc),
             )
 
         for raw in items:
             try:
                 outcome = await upsert(raw)
+            except ProductIncompleteError as exc:
+                skipped += 1
+                await self._record_skip(log, entity=entity, raw=raw, reason=str(exc))
+                continue
             except Exception:
                 failed += 1
                 await self._record_error(log, entity=entity, raw=raw)
@@ -153,15 +163,19 @@ class BlingSyncService:
             items_created=created,
             items_updated=updated,
             items_failed=failed,
+            items_skipped=skipped,
         )
 
     async def _upsert_product(self, raw: dict[str, Any]) -> str:
         bling_id = str(raw.get("id") or "").strip()
-        sku = str(raw.get("codigo") or "").strip() or f"BLING-{bling_id}"
-        source_name = str(raw.get("nome") or "").strip()
-        name = source_name or f"Produto sem descrição - {bling_id}"
+        sku = str(raw.get("codigo") or "").strip()
+        name = str(raw.get("nome") or "").strip()
         if not bling_id:
-            raise ValueError("product is missing id")
+            raise ProductIncompleteError("product is missing id")
+        if not sku:
+            raise ProductIncompleteError("product is missing codigo")
+        if not name:
+            raise ProductIncompleteError("product is missing nome")
 
         category = await self._category_for(raw)
         if category is None:
@@ -181,9 +195,8 @@ class BlingSyncService:
                 product = Product(bling_id=bling_id, sku=sku, name=name)
                 action = "created"
 
-        if not product.sku:
-            product.sku = sku
-        product.name = source_name or product.name or name
+        product.sku = sku
+        product.name = name
         product.description = raw.get("descricao") or product.description
         product.ean = self._clean_ean(raw.get("gtin")) or product.ean
         product.category_id = category.id
@@ -197,18 +210,27 @@ class BlingSyncService:
                 product.cost = float(cost)
         elif price is not None:
             product.price = float(price)
-        stock = raw.get("estoque")
-        if isinstance(stock, dict) and stock.get("saldo") is not None:
-            product.stock_quantity = int(stock["saldo"])
-        elif isinstance(stock, list) and stock:
-            saldo = stock[0].get("saldo") if isinstance(stock[0], dict) else None
-            if saldo is not None:
-                product.stock_quantity = int(saldo)
+        product.stock_quantity = self._stock_quantity(raw)
         situation = str(raw.get("situacao") or "A").upper()
         product.active = situation in ("A", "ATIVO", "1", "S")
         product.last_synced_at = self._now()
         await self._data_repo.upsert_product(product)
         return action
+
+    @staticmethod
+    def _stock_quantity(raw: dict[str, Any]) -> int:
+        stock = raw.get("estoque")
+        value = None
+        if isinstance(stock, dict):
+            value = stock.get("saldoVirtualTotal")
+        elif isinstance(stock, list) and stock and isinstance(stock[0], dict):
+            value = stock[0].get("saldoVirtualTotal")
+        if value is None:
+            return 0
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _category_field(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -335,6 +357,20 @@ class BlingSyncService:
             external_id=str(raw.get("id") or "")[:50],
             error_type="item_sync_error",
             error_message="Failed to sync item",
+            raw_data=raw,
+        )
+        self._data_repo.session.add(error)
+        await self._data_repo.session.flush()
+
+    async def _record_skip(
+        self, log: SyncLog, entity: str, raw: dict[str, Any], reason: str
+    ) -> None:
+        error = SyncError(
+            sync_log_id=log.id,
+            entity=entity,
+            external_id=str(raw.get("id") or "")[:50],
+            error_type="product_incomplete",
+            error_message=reason,
             raw_data=raw,
         )
         self._data_repo.session.add(error)

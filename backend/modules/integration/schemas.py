@@ -33,4 +33,5 @@ class SyncTriggerResponse(BaseModel):
     items_created: int
     items_updated: int
     items_failed: int
+    items_skipped: int = 0
     error_message: str | None = None

@@ -141,5 +141,6 @@ async def trigger_sync(
         items_created=result.items_created,
         items_updated=result.items_updated,
         items_failed=result.items_failed,
+        items_skipped=result.items_skipped,
         error_message=result.error_message,
     )
