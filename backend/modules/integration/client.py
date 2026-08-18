@@ -221,9 +221,7 @@ class BlingApiClient:
         self,
         token_provider: Callable[[], Awaitable[str]],
     ) -> list[dict[str, Any]]:
-        return await self.list_resource(
-            "/categorias/produtos", token_provider, {"limite": 100}
-        )
+        return await self.list_resource("/categorias/produtos", token_provider, {"limite": 100})
 
     async def fetch_orders(
         self,
@@ -239,6 +237,85 @@ class BlingApiClient:
         if data_final:
             params["dataFinal"] = data_final
         return await self.list_resource("/pedidos/vendas", token_provider, params)
+
+    async def fetch_channels(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        agrupador: int = 3,
+        page_size: int = 100,
+        max_pages: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch sales channels (marketplaces) from Bling.
+
+        agrupador 3 filters marketplace-type channels.
+        """
+        params: dict[str, str | int] = {"limite": page_size, "agrupador": agrupador}
+        return await self.list_resource(
+            "/canais-venda", token_provider, params, max_pages=max_pages
+        )
+
+    async def fetch_product_channels(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        page_size: int = 100,
+        max_pages: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch product-to-channel relationships from Bling."""
+        return await self.list_resource(
+            "/produtos/lojas", token_provider, {"limite": page_size}, max_pages=max_pages
+        )
+
+    async def fetch_listings(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        id_loja: str,
+        tipo_integracao: str,
+        page_size: int = 100,
+        max_pages: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch marketplace listings (anuncios) for a given channel.
+
+        Bling requires both ``idLoja`` and ``tipoIntegracao``.
+        """
+        params: dict[str, str | int] = {
+            "limite": page_size,
+            "idLoja": id_loja,
+            "tipoIntegracao": tipo_integracao,
+        }
+        return await self.list_resource("/anuncios", token_provider, params, max_pages=max_pages)
+
+    async def fetch_listing_detail(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        listing_id: str,
+        id_loja: str,
+        tipo_integracao: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a single marketplace listing detail from Bling."""
+        params: dict[str, str | int] = {"idLoja": id_loja, "tipoIntegracao": tipo_integracao}
+        response = await self.get_authenticated(f"/anuncios/{listing_id}", token_provider, params)
+        if response.status_code != 200:
+            raise ApiError(f"listing detail failed with status {response.status_code}")
+        body = response.json()
+        data = body.get("data")
+        return cast(dict[str, Any], data) if isinstance(data, dict) else None
+
+    async def fetch_situation(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        situation_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a single Bling situation (status) definition."""
+        response = await self.get_authenticated(f"/situacoes/{situation_id}", token_provider)
+        if response.status_code != 200:
+            raise ApiError(f"situation fetch failed with status {response.status_code}")
+        body = response.json()
+        data = body.get("data")
+        return cast(dict[str, Any], data) if isinstance(data, dict) else None
 
     @staticmethod
     def _parse_token_response(payload: dict[str, Any]) -> TokenResponse:

@@ -23,7 +23,9 @@ from backend.database.base import Base
 
 if TYPE_CHECKING:
     from backend.database.models.category import Category
+    from backend.database.models.listing import Listing
     from backend.database.models.order import OrderItem
+    from backend.database.models.product_channel import ProductChannel
 
 
 class Product(Base):
@@ -67,6 +69,12 @@ class Product(Base):
     )
     order_items: Mapped[list[OrderItem]] = relationship(
         "OrderItem", back_populates="product", lazy="selectin"
+    )
+    channel_links: Mapped[list[ProductChannel]] = relationship(
+        "ProductChannel", back_populates="product", lazy="selectin"
+    )
+    listings: Mapped[list[Listing]] = relationship(
+        "Listing", back_populates="product", lazy="selectin"
     )
 
 

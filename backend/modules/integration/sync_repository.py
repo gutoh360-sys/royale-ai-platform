@@ -5,8 +5,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models.category import Category
+from backend.database.models.listing import Listing
 from backend.database.models.order import Order, OrderItem
 from backend.database.models.product import Product
+from backend.database.models.product_channel import ProductChannel
+from backend.database.models.sales_channel import SalesChannel
 from backend.database.models.sync import SyncLog
 
 
@@ -31,11 +34,7 @@ class PostgresSyncLogRepository(ISyncLogRepository):
         return log
 
     async def list_recent(self, limit: int) -> list[SyncLog]:
-        stmt = (
-            select(SyncLog)
-            .order_by(SyncLog.started_at.desc())
-            .limit(limit)
-        )
+        stmt = select(SyncLog).order_by(SyncLog.started_at.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -96,3 +95,38 @@ class SyncDataRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def find_channel_by_bling_id(self, bling_id: str) -> SalesChannel | None:
+        stmt = select(SalesChannel).where(SalesChannel.bling_id == bling_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_channels(self) -> list[SalesChannel]:
+        stmt = select(SalesChannel)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def upsert_channel(self, channel: SalesChannel) -> SalesChannel:
+        self._session.add(channel)
+        await self._session.flush()
+        return channel
+
+    async def find_product_channel_by_bling_id(self, bling_id: str) -> ProductChannel | None:
+        stmt = select(ProductChannel).where(ProductChannel.bling_id == bling_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def upsert_product_channel(self, product_channel: ProductChannel) -> ProductChannel:
+        self._session.add(product_channel)
+        await self._session.flush()
+        return product_channel
+
+    async def find_listing_by_bling_id(self, bling_id: str) -> Listing | None:
+        stmt = select(Listing).where(Listing.bling_id == bling_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def upsert_listing(self, listing: Listing) -> Listing:
+        self._session.add(listing)
+        await self._session.flush()
+        return listing

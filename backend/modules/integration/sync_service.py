@@ -6,10 +6,14 @@ from typing import Any
 
 from backend.core.config.base import Settings
 from backend.core.logging import get_logger
+from backend.database.models.listing import Listing
 from backend.database.models.order import Order, OrderItem
 from backend.database.models.product import Product
+from backend.database.models.product_channel import ProductChannel
+from backend.database.models.sales_channel import SalesChannel
 from backend.database.models.sync import SyncError, SyncLog
 from backend.modules.integration.client import BlingApiClient
+from backend.modules.integration.errors import ApiError
 from backend.modules.integration.sync_repository import ISyncLogRepository, SyncDataRepository
 
 TokenProvider = Callable[[], Awaitable[str]]
@@ -24,7 +28,13 @@ def decimal_of(value: Any) -> Decimal:
 UNCATEGORIZED_ID = "uncategorized"
 UNCATEGORIZED_NAME = "Sem categoria"
 
-VALID_ENTITIES = ("products", "orders")
+VALID_ENTITIES = (
+    "products",
+    "orders",
+    "marketplaces",
+    "product_channels",
+    "listings",
+)
 
 
 @dataclass(frozen=True)
@@ -40,8 +50,16 @@ class SyncResult:
     error_message: str | None = None
 
 
-class ProductIncompleteError(Exception):
+class IncompleteSyncItemError(Exception):
+    """Raised when a synced item is missing required fields."""
+
+
+class ProductIncompleteError(IncompleteSyncItemError):
     """Raised when a Bling product is missing required cadastral fields."""
+
+
+class OrderItemUnknownProductError(ValueError):
+    """Raised when an order item references a product not present in the catalog."""
 
 
 class BlingSyncService:
@@ -62,6 +80,8 @@ class BlingSyncService:
         self._settings = settings
         self._order_days_back = order_days_back
         self._logger = get_logger(__name__)
+        self._situation_cache: dict[str, str] = {}
+        self._active_log: SyncLog | None = None
 
     @staticmethod
     def _now() -> datetime:
@@ -72,7 +92,15 @@ class BlingSyncService:
             raise ValueError(f"Unsupported entity: {entity}")
         if entity == "products":
             return await self.sync_products(sync_type=sync_type)
-        return await self.sync_orders()
+        if entity == "orders":
+            return await self.sync_orders()
+        if entity == "marketplaces":
+            return await self.sync_marketplaces()
+        if entity == "product_channels":
+            return await self.sync_product_channels()
+        if entity == "listings":
+            return await self.sync_listings()
+        raise ValueError(f"Unsupported entity: {entity}")
 
     async def sync_products(self, sync_type: str = "full") -> SyncResult:
         return await self._run_sync(
@@ -83,6 +111,59 @@ class BlingSyncService:
             ),
             upsert=self._upsert_product,
         )
+
+    async def sync_marketplaces(self, agrupador: int = 3) -> SyncResult:
+        return await self._run_sync(
+            entity="marketplaces",
+            sync_type="full",
+            fetch=lambda: self._client.fetch_channels(
+                self._token_provider,
+                agrupador=agrupador,
+                page_size=self._settings.BLING_SYNC_PAGE_SIZE,
+            ),
+            upsert=lambda raw: self._upsert_channel(raw, agrupador=agrupador),
+        )
+
+    async def sync_product_channels(self) -> SyncResult:
+        return await self._run_sync(
+            entity="product_channels",
+            sync_type="full",
+            fetch=lambda: self._client.fetch_product_channels(
+                self._token_provider, page_size=self._settings.BLING_SYNC_PAGE_SIZE
+            ),
+            upsert=self._upsert_product_channel,
+        )
+
+    async def sync_listings(self) -> SyncResult:
+        return await self._run_sync(
+            entity="listings",
+            sync_type="full",
+            fetch=self._fetch_listings,
+            upsert=self._upsert_listing,
+        )
+
+    async def _fetch_listings(self) -> list[dict[str, Any]]:
+        """Fetch listings for every synced marketplace channel.
+
+        Bling requires ``idLoja`` and ``tipoIntegracao`` when listing anuncios,
+        so we iterate over the channels persisted by ``sync_marketplaces``.
+        """
+        channels = await self._data_repo.list_channels()
+        items: list[dict[str, Any]] = []
+        for channel in channels:
+            if not channel.tipo:
+                continue
+            channel_items = await self._client.fetch_listings(
+                self._token_provider,
+                id_loja=channel.bling_id,
+                tipo_integracao=channel.tipo,
+                page_size=self._settings.BLING_SYNC_PAGE_SIZE,
+            )
+            for item in channel_items:
+                item["_channel_bling_id"] = channel.bling_id
+                item["_tipo_integracao"] = channel.tipo
+            items.extend(channel_items)
+        return items
 
     async def sync_orders(self) -> SyncResult:
         days_back = self._order_days_back or self._settings.BLING_ORDER_SYNC_DAYS_BACK
@@ -110,6 +191,7 @@ class BlingSyncService:
     ) -> SyncResult:
         log = SyncLog(sync_type=sync_type, entity=entity)
         await self._sync_log_repo.create(log)
+        self._active_log = log
         processed = created = updated = failed = skipped = 0
         try:
             items = await fetch()
@@ -134,7 +216,7 @@ class BlingSyncService:
         for raw in items:
             try:
                 outcome = await upsert(raw)
-            except ProductIncompleteError as exc:
+            except IncompleteSyncItemError as exc:
                 skipped += 1
                 await self._record_skip(log, entity=entity, raw=raw, reason=str(exc))
                 continue
@@ -249,6 +331,182 @@ class BlingSyncService:
             return None
         return await self._data_repo.upsert_category(bling_id, name)
 
+    async def _upsert_channel(self, raw: dict[str, Any], agrupador: int = 3) -> str:
+        bling_id = str(raw.get("id") or "").strip()
+        name = str(raw.get("descricao") or "").strip()
+        if not bling_id:
+            raise IncompleteSyncItemError("channel is missing id")
+        if not name:
+            raise IncompleteSyncItemError("channel is missing descricao")
+
+        existing = await self._data_repo.find_channel_by_bling_id(bling_id)
+        if existing is not None:
+            channel = existing
+            action = "updated"
+        else:
+            channel = SalesChannel(bling_id=bling_id, name=name)
+            action = "created"
+
+        channel.name = name
+        channel.tipo = self._clean_text(raw.get("tipo"), max_len=50)
+        channel.agrupador = self._as_optional_int(raw.get("agrupador")) or agrupador
+        channel.situacao = self._as_optional_int(raw.get("situacao"))
+        channel.last_synced_at = self._now()
+        await self._data_repo.upsert_channel(channel)
+        return action
+
+    async def _upsert_product_channel(self, raw: dict[str, Any]) -> str:
+        bling_id = str(raw.get("id") or "").strip()
+        if not bling_id:
+            raise IncompleteSyncItemError("product channel is missing id")
+
+        product_field = raw.get("produto") or {}
+        product_bling_id = (
+            str(product_field.get("id") or "").strip() if isinstance(product_field, dict) else ""
+        )
+        loja_field = raw.get("loja") or {}
+        channel_bling_id = (
+            str(loja_field.get("id") or "").strip() if isinstance(loja_field, dict) else ""
+        )
+        if not product_bling_id:
+            raise IncompleteSyncItemError("product channel is missing produto.id")
+        if not channel_bling_id:
+            raise IncompleteSyncItemError("product channel is missing loja.id")
+
+        product = await self._data_repo.find_product_by_bling_id(product_bling_id)
+        if product is None:
+            raise IncompleteSyncItemError(
+                f"product channel references unknown product bling_id={product_bling_id}"
+            )
+        channel = await self._data_repo.find_channel_by_bling_id(channel_bling_id)
+        if channel is None:
+            raise IncompleteSyncItemError(
+                f"product channel references unknown channel bling_id={channel_bling_id}"
+            )
+
+        existing = await self._data_repo.find_product_channel_by_bling_id(bling_id)
+        if existing is not None:
+            link = existing
+            action = "updated"
+        else:
+            link = ProductChannel(
+                bling_id=bling_id,
+                product_id=product.id,
+                channel_id=channel.id,
+            )
+            action = "created"
+
+        link.product_id = product.id
+        link.channel_id = channel.id
+        link.codigo = self._clean_text(raw.get("codigo"), max_len=100)
+        link.preco = self._as_optional_decimal(raw.get("preco"))
+        link.preco_promocional = self._as_optional_decimal(raw.get("precoPromocional"))
+        categorias = raw.get("categoriasProdutos")
+        if isinstance(categorias, list):
+            link.categoria_ids = [
+                str(cat.get("id"))
+                for cat in categorias
+                if isinstance(cat, dict) and cat.get("id") is not None
+            ] or None
+        link.last_synced_at = self._now()
+        await self._data_repo.upsert_product_channel(link)
+        return action
+
+    async def _upsert_listing(self, raw: dict[str, Any]) -> str:
+        bling_id = str(raw.get("id") or "").strip()
+        if not bling_id:
+            raise IncompleteSyncItemError("listing is missing id")
+
+        existing = await self._data_repo.find_listing_by_bling_id(bling_id)
+        if existing is not None:
+            listing = existing
+            action = "updated"
+        else:
+            listing = Listing(bling_id=bling_id)
+            action = "created"
+
+        channel_bling_id = str(raw.get("_channel_bling_id") or "").strip() or None
+        tipo_integracao = str(raw.get("_tipo_integracao") or "").strip() or None
+        listing.channel_bling_id = channel_bling_id
+        channel = (
+            await self._data_repo.find_channel_by_bling_id(channel_bling_id)
+            if channel_bling_id
+            else None
+        )
+        listing.channel_id = channel.id if channel else None
+        listing.title = self._clean_text(raw.get("titulo"), max_len=200)
+        listing.status = self._as_optional_int(raw.get("situacao"))
+        listing.price = self._as_optional_decimal(raw.get("preco"))
+        listing.external_code = self._clean_text(raw.get("codigo"), max_len=100)
+        listing.attributes = self._listing_attributes(raw.get("atributos"))
+        listing.last_synced_at = self._now()
+
+        product_bling_id = await self._resolve_listing_product_bling_id(
+            bling_id, channel_bling_id, tipo_integracao
+        )
+        listing.product_bling_id = product_bling_id
+        product = (
+            await self._data_repo.find_product_by_bling_id(product_bling_id)
+            if product_bling_id
+            else None
+        )
+        listing.product_id = product.id if product else None
+
+        await self._data_repo.upsert_listing(listing)
+        return action
+
+    async def _resolve_listing_product_bling_id(
+        self,
+        listing_id: str,
+        channel_bling_id: str | None,
+        tipo_integracao: str | None,
+    ) -> str | None:
+        if not channel_bling_id or not tipo_integracao:
+            return None
+        try:
+            detail = await self._client.fetch_listing_detail(
+                self._token_provider,
+                listing_id=listing_id,
+                id_loja=channel_bling_id,
+                tipo_integracao=tipo_integracao,
+            )
+        except ApiError:
+            return None
+        if detail is None:
+            return None
+        product_field = detail.get("produto") or {}
+        if isinstance(product_field, dict):
+            return str(product_field.get("id") or "").strip() or None
+        return None
+
+    @staticmethod
+    def _listing_attributes(raw: Any) -> dict[str, Any] | None:
+        if not isinstance(raw, list):
+            return None
+        attributes: dict[str, Any] = {}
+        for attr in raw:
+            if isinstance(attr, dict) and attr.get("id") is not None:
+                attributes[str(attr["id"])] = attr
+        return attributes or None
+
+    @staticmethod
+    def _as_optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _as_optional_decimal(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     async def _upsert_order(self, raw: dict[str, Any]) -> str:
         from uuid import uuid4
 
@@ -277,7 +535,7 @@ class BlingSyncService:
         order.customer_document = self._clean_text(customer.get("numeroDocumento"))
         order.customer_email = self._clean_text(customer.get("email"))
         order.customer_phone = self._clean_text(customer.get("celular"))
-        order.status = self._order_status(raw)
+        order.status = await self._order_status(raw)
         total = raw.get("total") or {}
         if isinstance(total, dict):
             if total.get("valor") is not None:
@@ -295,7 +553,10 @@ class BlingSyncService:
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                await self._upsert_order_item(order, item)
+                try:
+                    await self._upsert_order_item(order, item)
+                except OrderItemUnknownProductError as exc:
+                    await self._record_item_error(item, reason=str(exc))
         await self._data_repo.session.flush()
         return action
 
@@ -315,7 +576,9 @@ class BlingSyncService:
         if product is None and bling_id:
             product = await self._data_repo.find_product_by_bling_id(bling_id)
         if product is None:
-            raise ValueError(f"order item product not found for sku={sku or bling_id}")
+            raise OrderItemUnknownProductError(
+                f"order item product not found for sku={sku or bling_id}"
+            )
         product_name = str(raw.get("descricao") or raw.get("produto", {}).get("nome") or "")
         unit_price = decimal_of(raw.get("valor"))
         quantity = int(raw.get("quantidade") or 1)
@@ -338,17 +601,33 @@ class BlingSyncService:
         if raw.get("total") is not None:
             item.total_price = float(raw["total"])
 
-    @staticmethod
-    def _order_status(raw: dict[str, Any]) -> str:
+    async def _order_status(self, raw: dict[str, Any]) -> str:
         situation = raw.get("situacao") or {}
         if isinstance(situation, dict):
-            desc = str(situation.get("descricao") or "").lower()
-            if "conclu" in desc or "finaliz" in desc:
+            description = str(situation.get("descricao") or "").lower()
+            situation_id = situation.get("id")
+            if not description and situation_id is not None:
+                description = await self._situation_description(str(situation_id))
+            if "conclu" in description or "finaliz" in description:
                 return "completed"
-            if "cancel" in desc:
+            if "cancel" in description:
                 return "cancelled"
             return "pending"
         return "pending"
+
+    async def _situation_description(self, situation_id: str) -> str:
+        cached = self._situation_cache.get(situation_id)
+        if cached is not None:
+            return cached
+        description = ""
+        try:
+            situation = await self._client.fetch_situation(self._token_provider, situation_id)
+        except ApiError:
+            situation = None
+        if situation is not None:
+            description = str(situation.get("nome") or "").lower()
+        self._situation_cache[situation_id] = description
+        return description
 
     async def _record_error(self, log: SyncLog, entity: str, raw: dict[str, Any]) -> None:
         error = SyncError(
@@ -357,6 +636,21 @@ class BlingSyncService:
             external_id=str(raw.get("id") or "")[:50],
             error_type="item_sync_error",
             error_message="Failed to sync item",
+            raw_data=raw,
+        )
+        self._data_repo.session.add(error)
+        await self._data_repo.session.flush()
+
+    async def _record_item_error(self, raw: dict[str, Any], reason: str) -> None:
+        log = self._active_log
+        if log is None:
+            return
+        error = SyncError(
+            sync_log_id=log.id,
+            entity="orders",
+            external_id=str(raw.get("id") or "")[:50],
+            error_type="order_item_unknown_product",
+            error_message=reason,
             raw_data=raw,
         )
         self._data_repo.session.add(error)

@@ -13,6 +13,7 @@ from backend.core.middleware import (
     setup_rate_limit,
 )
 from backend.core.observability import setup_opentelemetry, setup_prometheus
+from backend.modules.analytics.router import router as analytics_router
 from backend.modules.catalog.router import router as catalog_router
 from backend.modules.integration.router import router as integration_router
 from backend.modules.order.router import router as order_router
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog_router)
     app.include_router(order_router)
     app.include_router(integration_router)
+    app.include_router(analytics_router)
 
     return app
 

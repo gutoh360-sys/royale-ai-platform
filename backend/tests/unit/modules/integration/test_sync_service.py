@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -539,10 +540,13 @@ async def test_sync_orders_persists_order_and_items(
     assert order.items[0].sku == "SKU-001"
 
 
-async def test_sync_orders_item_without_product_is_failed(
+async def test_sync_orders_item_without_product_keeps_order_and_records_error(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
+    from backend.database.models.order import Order
+    from backend.database.models.sync import SyncError
+
     payload = {
         "data": [
             {
@@ -561,9 +565,223 @@ async def test_sync_orders_item_without_product_is_failed(
     await db_session.commit()
 
     assert result.status == "completed"
-    assert result.items_failed == 1
+    assert result.items_failed == 0
+    assert result.items_skipped == 0
+    order = await db_session.scalar(select(Order).where(Order.external_id == "9002"))
+    assert order is not None
+    assert order.items == []
+    error = await db_session.scalar(select(SyncError))
+    assert error is not None
+    assert error.error_type == "order_item_unknown_product"
+    assert error.entity == "orders"
     log = await db_session.scalar(
         select(SyncLog).where(SyncLog.entity == "orders").order_by(SyncLog.started_at.desc())
     )
     assert log is not None
-    assert log.items_failed == 1
+    assert log.items_failed == 0
+
+
+async def test_sync_marketplaces_creates_and_updates_channels(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.sales_channel import SalesChannel
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/Api/v3/canais-venda"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": 10,
+                        "descricao": "Mercado Livre",
+                        "tipo": "MERCADO_LIVRE",
+                        "situacao": 1,
+                    },
+                    {"id": 11, "descricao": "Shopee", "tipo": "SHOPEE", "situacao": 1},
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    client = BlingApiClient(settings, client=http)
+    service = await _make_service(db_session, client, settings)
+
+    result = await service.sync_marketplaces()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 2
+    channels = (await db_session.execute(select(SalesChannel))).scalars().all()
+    assert len(channels) == 2
+    ml = await db_session.scalar(select(SalesChannel).where(SalesChannel.bling_id == "10"))
+    assert ml is not None
+    assert ml.name == "Mercado Livre"
+    assert ml.tipo == "MERCADO_LIVRE"
+    assert ml.agrupador == 3
+    assert ml.situacao == 1
+
+    result = await service.sync_marketplaces()
+    await db_session.commit()
+    assert result.items_created == 0
+    assert result.items_updated == 2
+
+
+async def test_sync_marketplaces_skips_missing_fields(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.sales_channel import SalesChannel
+
+    payload = {
+        "data": [
+            {"id": 12, "descricao": "Canal Ok", "tipo": "MARKETPLACE"},
+            {"id": None, "descricao": "Sem ID"},
+            {"id": 13, "descricao": ""},
+        ]
+    }
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+    result = await service.sync_marketplaces()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    assert result.items_skipped == 2
+    assert (
+        await db_session.scalar(select(SalesChannel).where(SalesChannel.bling_id == "13")) is None
+    )
+
+
+async def test_sync_product_channels_links_existing_products(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.product_channel import ProductChannel
+    from backend.database.models.sales_channel import SalesChannel
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+    db_session.add(
+        SalesChannel(bling_id="10", name="Mercado Livre", tipo="MERCADO_LIVRE", agrupador=3)
+    )
+    await db_session.flush()
+
+    payload = {
+        "data": [
+            {
+                "id": 500,
+                "codigo": "MLB-SKU-1",
+                "preco": 35.90,
+                "precoPromocional": 29.90,
+                "categoriasProdutos": [{"id": 777}],
+                "produto": {"id": 1},
+                "loja": {"id": 10},
+            }
+        ]
+    }
+    client = _make_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_product_channels()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 1
+    link = await db_session.scalar(select(ProductChannel).where(ProductChannel.bling_id == "500"))
+    assert link is not None
+    assert link.codigo == "MLB-SKU-1"
+    assert link.preco == Decimal("35.90")
+    assert link.preco_promocional == Decimal("29.90")
+    assert link.categoria_ids == ["777"]
+    assert link.product.sku == "SKU-001"
+    assert link.channel.name == "Mercado Livre"
+
+
+async def test_sync_product_channels_skips_when_references_unknown(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.product_channel import ProductChannel
+
+    payload = {
+        "data": [
+            {"id": 501, "produto": {"id": 999}, "loja": {"id": 10}},
+            {"id": 502, "produto": {"id": 1}, "loja": {"id": 10}},
+            {"id": 503, "produto": {"id": 1}, "loja": None},
+        ]
+    }
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+    result = await service.sync_product_channels()
+    await db_session.commit()
+
+    assert result.items_skipped == 3
+    assert result.items_created == 0
+    assert (
+        await db_session.scalar(select(ProductChannel).where(ProductChannel.bling_id == "501"))
+        is None
+    )
+
+
+async def test_sync_listings_requires_synced_channels(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.listing import Listing
+    from backend.database.models.sales_channel import SalesChannel
+
+    db_session.add(
+        SalesChannel(bling_id="10", name="Mercado Livre", tipo="MERCADO_LIVRE", agrupador=3)
+    )
+    await db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/Api/v3/anuncios":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": 100,
+                            "titulo": "Anuncio Um",
+                            "situacao": 1,
+                            "preco": 49.90,
+                            "codigo": "EXT-1",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"data": {"id": 100, "produto": {"id": 1}}})
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    client = BlingApiClient(settings, client=http)
+    service = await _make_service(db_session, client, settings)
+
+    result = await service.sync_listings()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 1
+    listing = await db_session.scalar(select(Listing).where(Listing.bling_id == "100"))
+    assert listing is not None
+    assert listing.title == "Anuncio Um"
+    assert listing.channel_bling_id == "10"
+    assert listing.channel_id is not None
+    assert listing.product_bling_id == "1"
+
+
+async def test_sync_listings_skips_when_no_channel_synced(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.listing import Listing
+
+    payload = {"data": [{"id": 101, "titulo": "Sem Canal", "situacao": 1}]}
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+    result = await service.sync_listings()
+    await db_session.commit()
+
+    assert result.items_created == 0
+    assert result.items_processed == 0
+    assert await db_session.scalar(select(Listing).where(Listing.bling_id == "101")) is None

@@ -2,8 +2,11 @@
 
 from backend.database.models.category import Category
 from backend.database.models.connection import IntegrationConnection
+from backend.database.models.listing import Listing
 from backend.database.models.order import Order, OrderItem
 from backend.database.models.product import Product, ProductImage
+from backend.database.models.product_channel import ProductChannel
+from backend.database.models.sales_channel import SalesChannel
 from backend.database.models.sync import SyncError, SyncLog
 
 __all__ = [
@@ -15,4 +18,7 @@ __all__ = [
     "SyncLog",
     "SyncError",
     "IntegrationConnection",
+    "SalesChannel",
+    "ProductChannel",
+    "Listing",
 ]

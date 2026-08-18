@@ -27,7 +27,8 @@ class SyncLog(Base):
             name="ck_sync_logs_type_valid",
         ),
         CheckConstraint(
-            "entity = ANY(ARRAY['products', 'orders'])",
+            "entity = ANY(ARRAY['products', 'orders', 'marketplaces', "
+            "'product_channels', 'listings'])",
             name="ck_sync_logs_entity_valid",
         ),
         CheckConstraint(

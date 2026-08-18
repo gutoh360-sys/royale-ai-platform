@@ -124,10 +124,12 @@ async def trigger_sync(
     entity: str,
     service: BlingSyncService = Depends(get_bling_sync_service),
 ) -> SyncTriggerResponse:
-    if entity not in ("products", "orders"):
+    if entity not in ("products", "orders", "marketplaces", "product_channels", "listings"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="entity must be one of: products, orders",
+            detail=(
+                "entity must be one of: products, orders, marketplaces, product_channels, listings"
+            ),
         )
     try:
         result = await service.sync(entity=entity)
