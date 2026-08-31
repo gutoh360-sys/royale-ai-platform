@@ -32,7 +32,7 @@ export async function fetchInventoryData(days: AnalyticsPeriodDays = 7): Promise
   try {
     const [products, analytics] = await Promise.all([
       api.get<Product[]>("/products"),
-      api.get<DashboardAnalytics>(`/api/analytics?days=${days}`),
+      api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`),
     ]);
 
     if (products.length === 0) {

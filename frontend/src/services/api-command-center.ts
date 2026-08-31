@@ -4,7 +4,7 @@ import type { CommandCenterData, CommandCenterResult } from "@/features/dashboar
 
 export async function fetchCommandCenterData(days: AnalyticsPeriodDays = 7): Promise<CommandCenterResult> {
   try {
-    const analytics = await api.get<DashboardAnalytics>(`/api/analytics?days=${days}`);
+    const analytics = await api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`);
 
     const completed = analytics.orders_by_status?.completed ?? 0;
     const pending = analytics.orders_by_status?.pending ?? 0;

@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BACKEND_PROXY_PREFIX = "/api/backend";
 
 interface ApiOptions extends RequestInit {
   timeout?: number;
@@ -15,12 +15,16 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  if (!path.startsWith("/")) {
+    throw new Error("API path must start with /");
+  }
+
   const { timeout = 15_000, ...init } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${BACKEND_PROXY_PREFIX}${path}`, {
       ...init,
       signal: controller.signal,
       headers: {

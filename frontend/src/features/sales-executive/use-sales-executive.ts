@@ -4,7 +4,9 @@ import { useState, useEffect } from "react"
 import type { SalesExecutive } from "./types"
 import { DefaultSalesExecutiveService } from "./service"
 
-export function useSalesExecutive(service = new DefaultSalesExecutiveService()) {
+const defaultSalesService = new DefaultSalesExecutiveService()
+
+export function useSalesExecutive(service = defaultSalesService) {
   const [data, setData] = useState<SalesExecutive | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

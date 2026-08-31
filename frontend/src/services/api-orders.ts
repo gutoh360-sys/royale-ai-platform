@@ -1,7 +1,16 @@
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import type { AnalyticsPeriodDays, Order, DashboardAnalytics } from "@/types/api";
-import type { SalesData, SalesDataResult, SalesCharts, RevenueEntry, OrderEntry } from "@/features/sales-executive/types";
+import { buildSalesInsights, buildSalesRecommendations } from "@/features/sales-executive/utils/sales-insights";
+import type {
+  SalesCharts,
+  SalesData,
+  SalesDataResult,
+  SalesExecutive,
+  SalesPeriodComparison,
+  RevenueEntry,
+  OrderEntry,
+} from "@/features/sales-executive/types";
 
 function mapSalesData(orders: Order[], analytics: DashboardAnalytics, days: AnalyticsPeriodDays): SalesData {
   const now = new Date();
@@ -61,7 +70,7 @@ export async function fetchSalesData(days: AnalyticsPeriodDays = 7): Promise<Sal
   try {
     const [orders, analytics] = await Promise.all([
       api.get<Order[]>("/orders"),
-      api.get<DashboardAnalytics>(`/api/analytics?days=${days}`),
+      api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`),
     ]);
 
     const sales = mapSalesData(orders, analytics, days);
@@ -73,9 +82,38 @@ export async function fetchSalesData(days: AnalyticsPeriodDays = 7): Promise<Sal
 
 export async function fetchSalesCharts(days: AnalyticsPeriodDays = 7): Promise<SalesCharts> {
   try {
-    const analytics = await api.get<DashboardAnalytics>(`/api/analytics?days=${days}`);
+    const analytics = await api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`);
     return mapCharts(analytics);
   } catch {
     return { revenueTrend: [], orderTrend: [] };
   }
+}
+
+function buildPeriodComparison(sales: SalesData): SalesPeriodComparison {
+  return {
+    revenue: { current: sales.revenue, previous: 0, change: 0 },
+    orders: { current: sales.orders, previous: 0, change: 0 },
+    averageTicket: { current: sales.averageTicket, previous: 0, change: 0 },
+    conversionRate: { current: sales.conversionRate, previous: 0, change: 0 },
+  };
+}
+
+export async function fetchSalesExecutiveData(days: AnalyticsPeriodDays = 30): Promise<SalesExecutive> {
+  const [salesResult, charts] = await Promise.all([
+    fetchSalesData(days),
+    fetchSalesCharts(days),
+  ]);
+
+  if (salesResult.status !== "success" || !salesResult.sales) {
+    throw new Error(salesResult.error ?? "Sales data unavailable");
+  }
+
+  return {
+    data: salesResult.sales,
+    charts,
+    insights: buildSalesInsights(salesResult.sales),
+    recommendations: buildSalesRecommendations(salesResult.sales),
+    comparison: buildPeriodComparison(salesResult.sales),
+    lastUpdated: new Date().toISOString(),
+  };
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowLeft, ArrowRight } from "lucide-react"
+import { AlertCircle, ArrowLeft, ArrowRight } from "lucide-react"
 import Link from "next/link"
 import { useSalesExecutive } from "./use-sales-executive"
 import {
@@ -14,13 +14,22 @@ import {
 } from "./components"
 
 export function SalesDetailPage() {
-  const { data, loading } = useSalesExecutive()
+  const { data, loading, error } = useSalesExecutive()
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="space-y-4">
         <div className="h-8 w-16 rounded bg-muted animate-pulse" />
         <SalesDetailSkeleton />
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex items-center justify-center gap-2 min-h-[400px]">
+        <AlertCircle className="size-5 text-destructive" />
+        <p className="text-sm text-muted-foreground">Erro ao carregar dados de vendas</p>
       </div>
     )
   }

@@ -5,7 +5,7 @@ import type { ExecutiveMetric } from "@/features/dashboard/executive-summary/typ
 import { Package, ShoppingCart, TrendingUp, DollarSign } from "lucide-react";
 
 export async function fetchDashboardAnalytics(): Promise<DashboardAnalytics> {
-  return api.get<DashboardAnalytics>("/api/analytics?days=30");
+  return api.get<DashboardAnalytics>("/analytics/dashboard?days=30");
 }
 
 export function mapToMetrics(data: DashboardAnalytics): ExecutiveMetric[] {

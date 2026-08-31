@@ -62,7 +62,7 @@ export function InventoryDetailPage() {
     return buildInventoryRecommendations(insightInput);
   }, [insightInput]);
 
-  if (status === "loading" || !inventory) {
+  if (status === "loading") {
     return (
       <ContentContainer>
         <InventoryDetailSkeleton />
@@ -76,6 +76,17 @@ export function InventoryDetailPage() {
         <div className="flex items-center justify-center gap-2 min-h-[400px]">
           <AlertCircle className="size-5 text-destructive" />
           <p className="text-sm text-muted-foreground">Erro ao carregar dados de estoque</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
+  if (!inventory) {
+    return (
+      <ContentContainer>
+        <div className="flex items-center justify-center gap-2 min-h-[400px]">
+          <AlertCircle className="size-5 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Nenhum dado de estoque encontrado</p>
         </div>
       </ContentContainer>
     );

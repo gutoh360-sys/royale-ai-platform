@@ -1,5 +1,5 @@
 import type { SalesExecutive } from "./types"
-import { buildMockSalesExecutive } from "./mock-data"
+import { fetchSalesExecutiveData } from "@/services/api-orders"
 
 export interface SalesExecutiveService {
   getSalesData(): Promise<SalesExecutive>
@@ -7,7 +7,6 @@ export interface SalesExecutiveService {
 
 export class DefaultSalesExecutiveService implements SalesExecutiveService {
   async getSalesData(): Promise<SalesExecutive> {
-    await new Promise((r) => setTimeout(r, 800))
-    return buildMockSalesExecutive()
+    return fetchSalesExecutiveData()
   }
 }
