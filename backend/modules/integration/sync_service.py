@@ -236,16 +236,22 @@ class BlingSyncService:
         log.items_failed = failed
         log.status = "completed"
         log.finished_at = self._now()
-        await self._data_repo.session.flush()
+        try:
+            await self._data_repo.session.flush()
+        except Exception as exc:
+            log.status = "failed"
+            log.error_message = f"flush failed: {exc}"
+            self._logger.error(f"bling_sync_{entity}_flush_failed", error=str(exc))
         return SyncResult(
             entity=entity,
             sync_type=sync_type,
-            status="completed",
+            status=log.status,
             items_processed=processed,
             items_created=created,
             items_updated=updated,
             items_failed=failed,
             items_skipped=skipped,
+            error_message=log.error_message,
         )
 
     async def _upsert_product(self, raw: dict[str, Any]) -> str:
