@@ -7,8 +7,8 @@ export interface Product {
   description: string | null;
   brand: string | null;
   category_id: string;
-  price: number;
-  cost: number | null;
+  price: number | string;
+  cost: number | string | null;
   stock_quantity: number;
   active: boolean;
   attributes: Record<string, unknown> | null;
@@ -35,9 +35,9 @@ export interface OrderItem {
   sku: string;
   product_name: string;
   quantity: number;
-  unit_price: number;
-  total_price: number;
-  cost: number | null;
+  unit_price: number | string;
+  total_price: number | string;
+  cost: number | string | null;
   created_at: string;
 }
 
@@ -51,9 +51,9 @@ export interface Order {
   customer_email: string | null;
   customer_phone: string | null;
   status: "pending" | "completed" | "cancelled";
-  total_amount: number;
-  shipping_amount: number | null;
-  discount_amount: number | null;
+  total_amount: number | string;
+  shipping_amount: number | string | null;
+  discount_amount: number | string | null;
   payment_method: string | null;
   notes: string | null;
   ordered_at: string;
@@ -66,7 +66,7 @@ export interface Order {
 export interface SalesByPeriod {
   day: string;
   total_orders: number;
-  revenue: number;
+  revenue: number | string;
 }
 
 export type AnalyticsPeriodDays = 1 | 7 | 30;
@@ -78,9 +78,21 @@ export interface DashboardAnalytics {
   total_stock: number;
   total_orders: number;
   orders_by_status: Record<string, number>;
-  revenue: number;
-  average_ticket: number | null;
+  revenue: number | string;
+  average_ticket: number | string | null;
   sales_by_period: SalesByPeriod[];
+}
+
+export interface SalesChannel {
+  id: string;
+  bling_id: string;
+  name: string;
+  tipo: string | null;
+  agrupador: number | null;
+  situacao: number | null;
+  created_at: string;
+  updated_at: string;
+  last_synced_at: string | null;
 }
 
 export interface SyncTriggerResponse {

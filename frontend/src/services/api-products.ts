@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { safeRatio, toNumber } from "@/lib/api-values";
 import { formatCurrency, formatPercentage } from "@/lib/format";
 import type { Product } from "@/types/api";
 import type {
@@ -9,9 +10,11 @@ import type {
 } from "@/features/products-executive/types";
 
 function mapProduct(p: Product, totalRevenue: number): ProductPerformance {
-  const revenue = p.price * (p.stock_quantity > 0 ? 1 : 0);
-  const margin = p.cost && p.cost > 0 ? ((p.price - p.cost) / p.price) * 100 : 0;
-  const share = totalRevenue > 0 ? (revenue / totalRevenue) * 100 : 0;
+  const price = toNumber(p.price);
+  const cost = toNumber(p.cost);
+  const revenue = price * (p.stock_quantity > 0 ? 1 : 0);
+  const margin = cost > 0 && price > 0 ? safeRatio(price - cost, price) * 100 : 0;
+  const share = safeRatio(revenue, totalRevenue) * 100;
 
   let status: ProductPerformance["status"] = "question_mark";
   if (margin > 40 && share > 5) status = "star";
@@ -72,7 +75,7 @@ export async function fetchProductsData(): Promise<ProductsDataResult> {
       };
     }
 
-    const totalRevenue = products.reduce((s, p) => s + p.price, 0);
+    const totalRevenue = products.reduce((s, p) => s + toNumber(p.price), 0);
     const mapped = products.map((p) => mapProduct(p, totalRevenue));
     const categories = mapCategories(mapped);
     const activeCount = products.filter((p) => p.active).length;

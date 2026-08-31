@@ -17,6 +17,7 @@ from backend.modules.analytics.router import router as analytics_router
 from backend.modules.catalog.router import router as catalog_router
 from backend.modules.integration.router import router as integration_router
 from backend.modules.order.router import router as order_router
+from backend.modules.sales_channel.router import router as sales_channel_router
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(catalog_router)
     app.include_router(order_router)
+    app.include_router(sales_channel_router)
     app.include_router(integration_router)
     app.include_router(analytics_router)
 

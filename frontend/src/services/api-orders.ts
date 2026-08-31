@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
 import type { AnalyticsPeriodDays, Order, DashboardAnalytics } from "@/types/api";
 import { buildSalesInsights, buildSalesRecommendations } from "@/features/sales-executive/utils/sales-insights";
@@ -16,22 +17,24 @@ function mapSalesData(orders: Order[], analytics: DashboardAnalytics, days: Anal
   const now = new Date();
   const periodStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
+  const revenue = toNumber(analytics.revenue);
+  const averageTicket = toNumber(analytics.average_ticket);
   const health = analytics.total_orders > 0
     ? Math.min(
         100,
         Math.round(
-          ((analytics.orders_by_status?.completed ?? 0) / analytics.total_orders) * 100,
+          (toNumber(analytics.orders_by_status?.completed) / analytics.total_orders) * 100,
         ),
       )
     : 0;
 
   return {
-    revenue: analytics.revenue,
-    formattedRevenue: formatCurrency(analytics.revenue),
+    revenue,
+    formattedRevenue: formatCurrency(revenue),
     orders: analytics.total_orders,
     formattedOrders: String(analytics.total_orders),
-    averageTicket: analytics.average_ticket ?? 0,
-    formattedAverageTicket: formatCurrency(analytics.average_ticket ?? 0),
+    averageTicket,
+    formattedAverageTicket: formatCurrency(averageTicket),
     conversionRate: 0,
     formattedConversionRate: "0%",
     productsSold: 0,
@@ -53,7 +56,7 @@ function mapSalesData(orders: Order[], analytics: DashboardAnalytics, days: Anal
 function mapCharts(analytics: DashboardAnalytics): SalesCharts {
   const revenueTrend: RevenueEntry[] = analytics.sales_by_period.map((s) => ({
     date: s.day,
-    value: s.revenue,
+    value: toNumber(s.revenue),
     label: s.day,
   }));
 

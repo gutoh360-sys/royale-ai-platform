@@ -50,6 +50,30 @@ describe("backend proxy route", () => {
     expect(await response.json()).toEqual([{ id: "o1" }]);
   });
 
+  it("can use backend BLING_ADMIN credentials when generic admin vars are absent", async () => {
+    vi.stubEnv("BACKEND_URL", "https://backend.test");
+    vi.stubEnv("BLING_ADMIN_USERNAME", "bling-user");
+    vi.stubEnv("BLING_ADMIN_PASSWORD", "bling-pass");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([{ id: "channel-1" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GET } = await loadRoute();
+    const response = await GET(
+      new Request("http://frontend.test/api/backend/sales-channels"),
+      context(["sales-channels"]),
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init.headers as HeadersInit);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://backend.test/sales-channels",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(headers.get("Authorization")).toBe(`Basic ${btoa("bling-user:bling-pass")}`);
+    expect(response.status).toBe(200);
+  });
+
   it("does not forward browser Authorization headers", async () => {
     vi.stubEnv("BACKEND_URL", "https://backend.test");
     vi.stubEnv("ADMIN_USERNAME", "proxy-user");

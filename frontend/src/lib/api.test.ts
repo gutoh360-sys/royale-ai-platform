@@ -17,6 +17,7 @@ describe("browser API client", () => {
   it.each([
     ["/orders", "/api/backend/orders"],
     ["/products", "/api/backend/products"],
+    ["/sales-channels", "/api/backend/sales-channels"],
     ["/analytics/dashboard?days=7", "/api/backend/analytics/dashboard?days=7"],
   ])("calls backend reads through a relative Next.js proxy for %s", async (path, expected) => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse([]));

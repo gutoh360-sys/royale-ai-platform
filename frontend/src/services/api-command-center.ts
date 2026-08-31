@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { toNumber } from "@/lib/api-values";
 import type { AnalyticsPeriodDays, DashboardAnalytics } from "@/types/api";
 import type { CommandCenterData, CommandCenterResult } from "@/features/dashboard/executive-command-center/types";
 
@@ -6,9 +7,11 @@ export async function fetchCommandCenterData(days: AnalyticsPeriodDays = 7): Pro
   try {
     const analytics = await api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`);
 
-    const completed = analytics.orders_by_status?.completed ?? 0;
-    const pending = analytics.orders_by_status?.pending ?? 0;
+    const completed = toNumber(analytics.orders_by_status?.completed);
+    const pending = toNumber(analytics.orders_by_status?.pending);
     const total = analytics.total_orders;
+    const revenue = toNumber(analytics.revenue);
+    const averageTicket = toNumber(analytics.average_ticket);
 
     const completionRate = total > 0 ? (completed / total) * 100 : 0;
     const healthScore = Math.min(100, Math.round(
@@ -39,11 +42,11 @@ export async function fetchCommandCenterData(days: AnalyticsPeriodDays = 7): Pro
       });
     }
 
-    if (analytics.revenue > 0 && analytics.average_ticket) {
+    if (revenue > 0 && averageTicket > 0) {
       recommendations.push({
         id: "boost-ticket",
         action: "Aumentar ticket médio com combos",
-        reason: `Ticket médio atual: R$ ${analytics.average_ticket.toFixed(2)}`,
+        reason: `Ticket médio atual: R$ ${averageTicket.toFixed(2)}`,
         impact: "Crescer receita sem aumentar tráfego",
         priority: "low",
       });

@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
 import type { AnalyticsPeriodDays, Product, DashboardAnalytics } from "@/types/api";
 import type { InventoryData, InventoryDataResult } from "@/features/inventory-executive/types";
@@ -7,7 +8,7 @@ import type { InventoryIntelligenceSummary } from "@/features/inventory-intellig
 function buildSummary(products: Product[], analytics: DashboardAnalytics): InventoryIntelligenceSummary {
   const withStock = products.filter((p) => p.stock_quantity > 0);
   const outOfStock = products.filter((p) => p.stock_quantity <= 0 && p.active);
-  const totalValue = products.reduce((s, p) => s + p.price * p.stock_quantity, 0);
+  const totalValue = products.reduce((s, p) => s + toNumber(p.price) * p.stock_quantity, 0);
 
   return {
     totalProducts: products.length,
@@ -41,7 +42,7 @@ export async function fetchInventoryData(days: AnalyticsPeriodDays = 7): Promise
 
     const summary = buildSummary(products, analytics);
     const withStock = products.filter((p) => p.stock_quantity > 0);
-    const totalValue = products.reduce((s, p) => s + p.price * p.stock_quantity, 0);
+    const totalValue = products.reduce((s, p) => s + toNumber(p.price) * p.stock_quantity, 0);
 
     const health = products.length > 0 ? Math.min(100, Math.round((withStock.length / products.length) * 100)) : 0;
 

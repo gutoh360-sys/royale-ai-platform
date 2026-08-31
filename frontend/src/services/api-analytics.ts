@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
 import type { DashboardAnalytics } from "@/types/api";
 import type { ExecutiveMetric } from "@/features/dashboard/executive-summary/types";
@@ -13,8 +14,8 @@ export function mapToMetrics(data: DashboardAnalytics): ExecutiveMetric[] {
     {
       id: "revenue",
       label: "Receita",
-      value: data.revenue,
-      formattedValue: formatCurrency(data.revenue),
+      value: toNumber(data.revenue),
+      formattedValue: formatCurrency(toNumber(data.revenue)),
       variation: 0,
       trend: "neutral",
       comparisonLabel: "últimos 30 dias",
@@ -43,8 +44,8 @@ export function mapToMetrics(data: DashboardAnalytics): ExecutiveMetric[] {
     {
       id: "ticket",
       label: "Ticket Médio",
-      value: data.average_ticket ?? 0,
-      formattedValue: formatCurrency(data.average_ticket ?? 0),
+      value: toNumber(data.average_ticket),
+      formattedValue: formatCurrency(toNumber(data.average_ticket)),
       variation: 0,
       trend: "neutral",
       comparisonLabel: "por pedido",

@@ -8,17 +8,19 @@ const ALLOWED_GET_PATHS = new Set([
   "analytics/dashboard",
   "orders",
   "products",
+  "sales-channels",
 ]);
 
 const ALLOWED_QUERY_PARAMS: Record<string, Set<string>> = {
   "analytics/dashboard": new Set(["days"]),
   orders: new Set(["status"]),
   products: new Set(),
+  "sales-channels": new Set(),
 };
 
 function serverAuth() {
-  const user = process.env.ADMIN_USERNAME ?? "";
-  const password = process.env.ADMIN_PASSWORD ?? "";
+  const user = process.env.BLING_ADMIN_USERNAME ?? process.env.ADMIN_USERNAME ?? "";
+  const password = process.env.BLING_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD ?? "";
 
   if (!user || !password) return null;
   return `Basic ${btoa(`${user}:${password}`)}`;

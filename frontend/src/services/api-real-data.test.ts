@@ -4,7 +4,32 @@ import { fetchInventoryData } from "./api-inventory";
 import { fetchMarketplaceData } from "./api-marketplace";
 import { fetchSalesData } from "./api-orders";
 import { fetchProductsData } from "./api-products";
-import type { DashboardAnalytics, Order, Product } from "@/types/api";
+import type { DashboardAnalytics, Order, Product, SalesChannel } from "@/types/api";
+
+const channels: SalesChannel[] = [
+  {
+    id: "channel-1",
+    bling_id: "10",
+    name: "Mercado Livre",
+    tipo: "MERCADO_LIVRE",
+    agrupador: 3,
+    situacao: 1,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    last_synced_at: "2026-08-01T00:00:00Z",
+  },
+  {
+    id: "channel-2",
+    bling_id: "20",
+    name: "Shopee",
+    tipo: "SHOPEE",
+    agrupador: 3,
+    situacao: 1,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    last_synced_at: "2026-08-01T00:00:00Z",
+  },
+];
 
 const orders: Order[] = [
   {
@@ -17,7 +42,7 @@ const orders: Order[] = [
     customer_email: null,
     customer_phone: null,
     status: "completed",
-    total_amount: 100,
+    total_amount: "100.00",
     shipping_amount: null,
     discount_amount: null,
     payment_method: null,
@@ -38,7 +63,7 @@ const orders: Order[] = [
     customer_email: null,
     customer_phone: null,
     status: "pending",
-    total_amount: 50,
+    total_amount: "50.00",
     shipping_amount: null,
     discount_amount: null,
     payment_method: null,
@@ -61,8 +86,8 @@ const products: Product[] = [
     description: null,
     brand: null,
     category_id: "cat-1",
-    price: 100,
-    cost: 60,
+    price: "100.00",
+    cost: "60.00",
     stock_quantity: 10,
     active: true,
     attributes: null,
@@ -79,7 +104,7 @@ const products: Product[] = [
     description: null,
     brand: null,
     category_id: "cat-2",
-    price: 50,
+    price: "50.00",
     cost: null,
     stock_quantity: 0,
     active: true,
@@ -97,11 +122,11 @@ const analytics: DashboardAnalytics = {
   total_stock: 10,
   total_orders: 2,
   orders_by_status: { completed: 1, pending: 1 },
-  revenue: 150,
-  average_ticket: 75,
+  revenue: "150.00",
+  average_ticket: "75.00",
   sales_by_period: [
-    { day: "2026-08-01", total_orders: 1, revenue: 100 },
-    { day: "2026-08-02", total_orders: 1, revenue: 50 },
+    { day: "2026-08-01", total_orders: 1, revenue: "100.00" },
+    { day: "2026-08-02", total_orders: 1, revenue: "50.00" },
   ],
 };
 
@@ -115,6 +140,7 @@ function stubBackendReads() {
   const fetchMock = vi.fn((url: string) => {
     if (url.startsWith("/api/backend/orders")) return Promise.resolve(jsonResponse(orders));
     if (url.startsWith("/api/backend/products")) return Promise.resolve(jsonResponse(products));
+    if (url.startsWith("/api/backend/sales-channels")) return Promise.resolve(jsonResponse(channels));
     if (url.startsWith("/api/backend/analytics/dashboard")) return Promise.resolve(jsonResponse(analytics));
     return Promise.resolve(new Response("Not found", { status: 404 }));
   });
@@ -133,12 +159,12 @@ describe("real backend data services", () => {
 
     const result = await fetchMarketplaceData();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/backend/orders",
-      expect.objectContaining({ method: "GET" }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/sales-channels", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/orders", expect.any(Object));
     expect(result.status).toBe("success");
     expect(result.marketplaces.map((m) => m.name)).toEqual(["Mercado Livre", "Shopee"]);
+    expect(result.summary.totalRevenue).not.toContain("NaN");
+    expect(result.summary.averageTicket).not.toContain("NaN");
   });
 
   it("keeps Products on real product reads", async () => {
