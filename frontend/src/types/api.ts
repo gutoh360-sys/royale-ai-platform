@@ -69,6 +69,8 @@ export interface SalesByPeriod {
   revenue: number;
 }
 
+export type AnalyticsPeriodDays = 1 | 7 | 30;
+
 export interface DashboardAnalytics {
   total_products: number;
   active_products: number;

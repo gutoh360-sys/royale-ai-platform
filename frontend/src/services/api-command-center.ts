@@ -1,10 +1,10 @@
 import { api } from "@/lib/api";
-import type { DashboardAnalytics } from "@/types/api";
+import type { AnalyticsPeriodDays, DashboardAnalytics } from "@/types/api";
 import type { CommandCenterData, CommandCenterResult } from "@/features/dashboard/executive-command-center/types";
 
-export async function fetchCommandCenterData(): Promise<CommandCenterResult> {
+export async function fetchCommandCenterData(days: AnalyticsPeriodDays = 7): Promise<CommandCenterResult> {
   try {
-    const analytics = await api.get<DashboardAnalytics>("/api/analytics?days=30");
+    const analytics = await api.get<DashboardAnalytics>(`/api/analytics?days=${days}`);
 
     const completed = analytics.orders_by_status?.completed ?? 0;
     const pending = analytics.orders_by_status?.pending ?? 0;

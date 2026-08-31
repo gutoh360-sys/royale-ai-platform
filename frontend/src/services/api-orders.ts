@@ -1,11 +1,20 @@
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
-import type { Order, DashboardAnalytics } from "@/types/api";
+import type { AnalyticsPeriodDays, Order, DashboardAnalytics } from "@/types/api";
 import type { SalesData, SalesDataResult, SalesCharts, RevenueEntry, OrderEntry } from "@/features/sales-executive/types";
 
-function mapSalesData(orders: Order[], analytics: DashboardAnalytics): SalesData {
+function mapSalesData(orders: Order[], analytics: DashboardAnalytics, days: AnalyticsPeriodDays): SalesData {
   const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const periodStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const health = analytics.total_orders > 0
+    ? Math.min(
+        100,
+        Math.round(
+          ((analytics.orders_by_status?.completed ?? 0) / analytics.total_orders) * 100,
+        ),
+      )
+    : 0;
 
   return {
     revenue: analytics.revenue,
@@ -22,12 +31,12 @@ function mapSalesData(orders: Order[], analytics: DashboardAnalytics): SalesData
     formattedCustomersServed: String(new Set(orders.map((o) => o.customer_name)).size),
     growth: 0,
     formattedGrowth: "0%",
-    health: analytics.total_orders > 0 ? 85 : 0,
-    formattedHealth: analytics.total_orders > 0 ? "85%" : "0%",
+    health,
+    formattedHealth: `${health}%`,
     period: {
-      start: thirtyDaysAgo.toISOString().split("T")[0],
+      start: periodStart.toISOString().split("T")[0],
       end: now.toISOString().split("T")[0],
-      label: "Últimos 30 dias",
+      label: `Últimos ${days} dias`,
     },
   };
 }
@@ -48,23 +57,23 @@ function mapCharts(analytics: DashboardAnalytics): SalesCharts {
   return { revenueTrend, orderTrend };
 }
 
-export async function fetchSalesData(): Promise<SalesDataResult> {
+export async function fetchSalesData(days: AnalyticsPeriodDays = 7): Promise<SalesDataResult> {
   try {
     const [orders, analytics] = await Promise.all([
       api.get<Order[]>("/orders"),
-      api.get<DashboardAnalytics>("/api/analytics?days=30"),
+      api.get<DashboardAnalytics>(`/api/analytics?days=${days}`),
     ]);
 
-    const sales = mapSalesData(orders, analytics);
+    const sales = mapSalesData(orders, analytics, days);
     return { sales, status: "success", error: null };
   } catch (e) {
     return { sales: null, status: "error", error: e instanceof Error ? e.message : "Unknown error" };
   }
 }
 
-export async function fetchSalesCharts(): Promise<SalesCharts> {
+export async function fetchSalesCharts(days: AnalyticsPeriodDays = 7): Promise<SalesCharts> {
   try {
-    const analytics = await api.get<DashboardAnalytics>("/api/analytics?days=30");
+    const analytics = await api.get<DashboardAnalytics>(`/api/analytics?days=${days}`);
     return mapCharts(analytics);
   } catch {
     return { revenueTrend: [], orderTrend: [] };

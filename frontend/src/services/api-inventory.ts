@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
-import type { Product, DashboardAnalytics } from "@/types/api";
+import type { AnalyticsPeriodDays, Product, DashboardAnalytics } from "@/types/api";
 import type { InventoryData, InventoryDataResult } from "@/features/inventory-executive/types";
 import type { InventoryIntelligenceSummary } from "@/features/inventory-intelligence/types";
 
@@ -28,11 +28,11 @@ function buildSummary(products: Product[], analytics: DashboardAnalytics): Inven
   };
 }
 
-export async function fetchInventoryData(): Promise<InventoryDataResult> {
+export async function fetchInventoryData(days: AnalyticsPeriodDays = 7): Promise<InventoryDataResult> {
   try {
     const [products, analytics] = await Promise.all([
       api.get<Product[]>("/products"),
-      api.get<DashboardAnalytics>("/api/analytics?days=30"),
+      api.get<DashboardAnalytics>(`/api/analytics?days=${days}`),
     ]);
 
     if (products.length === 0) {
@@ -43,10 +43,12 @@ export async function fetchInventoryData(): Promise<InventoryDataResult> {
     const withStock = products.filter((p) => p.stock_quantity > 0);
     const totalValue = products.reduce((s, p) => s + p.price * p.stock_quantity, 0);
 
+    const health = products.length > 0 ? Math.min(100, Math.round((withStock.length / products.length) * 100)) : 0;
+
     const inventory: InventoryData = {
       id: "main",
       name: "Estoque Geral",
-      health: analytics.total_stock > 0 ? 75 : 0,
+      health,
       itemsInStock: withStock.length,
       formattedItemsInStock: String(withStock.length),
       itemsWithoutTurnover: summary.slowMovingCount,

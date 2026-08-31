@@ -1,9 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { DashboardLayout } from "./dashboard-layout";
 import { DashboardFooter } from "./dashboard-footer";
-import { ExecutiveBriefing } from "@/features/executive-briefing/components/executive-briefing";
-import { ExecutiveTimeline } from "@/features/executive-timeline/components/executive-timeline";
 import { ExecutiveSummary } from "@/features/dashboard/executive-summary/components/executive-summary";
 import { ExecutiveRecommendation } from "@/features/dashboard/executive-command-center/components/executive-recommendation";
 import { ExecutiveHealthSummary } from "./executive-health-summary";
@@ -13,21 +12,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
 import { useExecutiveCommandCenter } from "@/features/dashboard/executive-command-center/hooks/use-executive-command-center";
 import { useMarketplaceData } from "@/features/marketplace/hooks/use-marketplace-data";
-import { useFinancialData } from "@/features/financial-executive/hooks/use-financial-data";
 import { useInventoryData } from "@/features/inventory-executive/hooks/use-inventory-data";
 import { useSalesData } from "@/features/sales-executive/hooks/use-sales-data";
 import { useProductsData } from "@/features/products-executive/hooks/use-products-data";
-import { usePurchasingData } from "@/features/purchasing-executive/hooks/use-purchasing-data";
 import type { ActionItem } from "./executive-action-list";
+import type { AnalyticsPeriodDays } from "@/types/api";
 
 export function DashboardPage() {
-  const { data: cc, status: ccStatus } = useExecutiveCommandCenter();
+  const [days, setDays] = useState<AnalyticsPeriodDays>(7);
+
+  const { data: cc, status: ccStatus } = useExecutiveCommandCenter(days);
   const { summary: mpSummary, status: mpStatus } = useMarketplaceData();
-  const { financial, status: fnStatus } = useFinancialData();
-  const { inventory, status: invStatus } = useInventoryData();
-  const { sales, status: salesStatus } = useSalesData();
+  const { inventory, status: invStatus } = useInventoryData(days);
+  const { sales, status: salesStatus } = useSalesData(days);
   const { summary: prSummary, status: prStatus } = useProductsData();
-  const { summary: puSummary, status: puStatus } = usePurchasingData();
 
   const isLoading = ccStatus === "loading";
   const isError = ccStatus === "error";
@@ -68,18 +66,15 @@ export function DashboardPage() {
 
   const mpRevenue = mpStatus === "success" ? mpSummary.totalRevenue : "R$ 0";
   const mpHealth = mpStatus === "success" ? mpSummary.averageHealth : 0;
-  const fnRevenue = fnStatus === "success" && financial ? financial.formattedRevenue : "R$ 0";
-  const fnHealth = fnStatus === "success" && financial ? financial.health : 0;
   const mpInsight = mpStatus === "success" && mpSummary.highestGrowth !== 0
     ? `${mpSummary.highestGrowthName} cresceu ${mpSummary.highestGrowth}% este período`
     : "Carregando...";
-  const fnInsight = fnStatus === "success" && financial
-    ? `Margem de ${financial.formattedMargin}, fluxo de caixa em ${financial.formattedCashFlow}`
-    : "Carregando...";
-  const invCapital = invStatus === "success" && inventory ? inventory.formattedImmobilizedCapital : "R$ 0";
+  const invCapital = invStatus === "success" && inventory ? inventory.formattedStockValue : "R$ 0";
   const invHealth = invStatus === "success" && inventory ? inventory.health : 0;
+  const invItemsWithStock = invStatus === "success" && inventory ? inventory.itemsInStock : 0;
+  const invItemsTotal = invStatus === "success" && inventory ? inventory.totalCapacity : 0;
   const invInsight = invStatus === "success" && inventory
-    ? `Cobertura de ${inventory.formattedAverageCoverage}, giro de ${inventory.formattedAverageTurnover}`
+    ? `${invItemsWithStock} de ${invItemsTotal} produtos com estoque`
     : "Carregando...";
   const salesRevenue = salesStatus === "success" && sales ? sales.formattedRevenue : "R$ 0";
   const salesHealth = salesStatus === "success" && sales ? sales.health : 0;
@@ -88,11 +83,9 @@ export function DashboardPage() {
     : "Carregando...";
 
   return (
-    <DashboardLayout>
-      <ExecutiveBriefing />
-
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
-        <div className="flex flex-col gap-8 xl:col-span-2">
+    <DashboardLayout days={days} onDaysChange={setDays}>
+      <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-8">
           <ExecutiveHealthSummary
             score={cc.status.healthScore}
             label={cc.status.label}
@@ -103,7 +96,7 @@ export function DashboardPage() {
             <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
               Resumo dos Modulos
             </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
               <ExecutiveModuleCard
                 name="Marketplace"
                 icon="M"
@@ -115,21 +108,11 @@ export function DashboardPage() {
                 enabled={mpStatus === "success"}
               />
               <ExecutiveModuleCard
-                name="Financeiro"
-                icon="F"
-                href="/financial"
-                kpi={fnRevenue}
-                kpiLabel="Receita total"
-                insight={fnInsight}
-                priority={fnHealth >= 80 ? "baixa" : fnHealth >= 60 ? "media" : "alta"}
-                enabled={fnStatus === "success"}
-              />
-              <ExecutiveModuleCard
                 name="Estoque"
                 icon="E"
                 href="/inventory"
                 kpi={invCapital}
-                kpiLabel="Capital imobilizado"
+                kpiLabel="Valor em estoque"
                 insight={invInsight}
                 priority={invHealth >= 80 ? "baixa" : invHealth >= 60 ? "media" : "alta"}
                 enabled={invStatus === "success"}
@@ -140,7 +123,7 @@ export function DashboardPage() {
                 href="/products"
                 kpi={prSummary.totalRevenue}
                 kpiLabel="Receita total"
-                insight={`${prSummary.activeProducts} produtos ativos, margem media de ${prSummary.averageMargin}`}
+                insight={`${prSummary.activeProducts} produtos ativos`}
                 priority={prSummary.health >= 80 ? "baixa" : prSummary.health >= 60 ? "media" : "alta"}
                 enabled={prStatus === "success"}
               />
@@ -153,16 +136,6 @@ export function DashboardPage() {
                 insight={salesInsight}
                 priority={salesHealth >= 80 ? "baixa" : salesHealth >= 60 ? "media" : "alta"}
                 enabled={salesStatus === "success"}
-              />
-              <ExecutiveModuleCard
-                name="Compras"
-                icon="C"
-                href="/purchasing"
-                kpi={puSummary.capitalInPurchases}
-                kpiLabel="Capital em compras"
-                insight={`${puSummary.productsToReplenish} produtos para repor, cobertura de ${puSummary.averageCoverage}`}
-                priority={puSummary.health >= 80 ? "baixa" : puSummary.health >= 50 ? "media" : "alta"}
-                enabled={puStatus === "success"}
               />
             </div>
           </section>
@@ -198,10 +171,6 @@ export function DashboardPage() {
             </div>
           </div>
         </div>
-
-        <aside className="xl:border-l xl:border-border/50 xl:pl-8" aria-label="Contexto executivo">
-          <ExecutiveTimeline />
-        </aside>
       </div>
 
       <DashboardFooter />

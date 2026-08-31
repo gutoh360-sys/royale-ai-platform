@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Clock } from "lucide-react";
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import type { AnalyticsPeriodDays } from "@/types/api";
 
 function useGreeting() {
   return useMemo(() => {
@@ -26,32 +26,44 @@ function useFormattedDate() {
   );
 }
 
-const periods = ["Hoje", "7 dias", "30 dias"] as const;
+const periods: { label: string; days: AnalyticsPeriodDays }[] = [
+  { label: "Hoje", days: 1 },
+  { label: "7 dias", days: 7 },
+  { label: "30 dias", days: 30 },
+];
 
-function PeriodSelector() {
-  const [active, setActive] = useState<(typeof periods)[number]>("7 dias");
+interface PeriodSelectorProps {
+  days: AnalyticsPeriodDays;
+  onDaysChange?: (days: AnalyticsPeriodDays) => void;
+}
 
+function PeriodSelector({ days, onDaysChange }: PeriodSelectorProps) {
   return (
     <div className="flex items-center gap-1 rounded-lg border p-0.5">
       {periods.map((period) => (
         <button
-          key={period}
-          onClick={() => setActive(period)}
+          key={period.days}
+          onClick={() => onDaysChange?.(period.days)}
           className={cn(
             "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            active === period
+            days === period.days
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {period}
+          {period.label}
         </button>
       ))}
     </div>
   );
 }
 
-export function DashboardHeader() {
+interface DashboardHeaderProps {
+  days?: AnalyticsPeriodDays;
+  onDaysChange?: (days: AnalyticsPeriodDays) => void;
+}
+
+export function DashboardHeader({ days = 7, onDaysChange }: DashboardHeaderProps) {
   const greeting = useGreeting();
   const date = useFormattedDate();
 
@@ -66,13 +78,9 @@ export function DashboardHeader() {
         </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
           <p className="text-xs text-muted-foreground capitalize">{date}</p>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="size-3" aria-hidden="true" />
-            <span>Última sincronização: Há 2 minutos</span>
-          </div>
         </div>
       </div>
-      <PeriodSelector />
+      <PeriodSelector days={days} onDaysChange={onDaysChange} />
     </div>
   );
 }
