@@ -2,12 +2,15 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config.base import Settings
+from backend.database.models.category import Category
 from backend.database.models.product import Product
-from backend.database.models.sync import SyncLog
+from backend.database.models.sync import SyncError, SyncLog
 from backend.modules.integration.client import BlingApiClient
 from backend.modules.integration.sync_repository import (
     PostgresSyncLogRepository,
@@ -76,6 +79,33 @@ async def _make_service(
         data_repo=SyncDataRepository(session),
         settings=settings,
     )
+
+
+def _product(bling_id: str, sku: str, name: str | None = None) -> dict[str, Any]:
+    return {"id": bling_id, "codigo": sku, "nome": name or f"Produto {bling_id}"}
+
+
+async def _seed_sku_conflict(session: AsyncSession) -> None:
+    category = Category(bling_id="seed-category", name="Seed Category")
+    session.add(category)
+    await session.flush()
+    session.add_all(
+        [
+            Product(
+                bling_id="seed-a",
+                sku="SEED-A",
+                name="Seed A",
+                category_id=category.id,
+            ),
+            Product(
+                bling_id="seed-b",
+                sku="SEED-B",
+                name="Seed B",
+                category_id=category.id,
+            ),
+        ]
+    )
+    await session.commit()
 
 
 async def test_sync_products_creates_and_maps(
@@ -461,6 +491,329 @@ async def test_sync_products_incomplete_records_sync_error_with_reason(
     assert error.raw_data == payload["data"][0]
 
 
+@pytest.mark.parametrize("failure_index", [0, 1, 2], ids=["first", "middle", "last"])
+async def test_sync_products_isolates_constraint_failure_per_item(
+    db_session: AsyncSession,
+    settings: Settings,
+    failure_index: int,
+) -> None:
+    await _seed_sku_conflict(db_session)
+    failing = _product("seed-a", "SEED-B", "Conflito de SKU")
+    valid = [
+        _product("valid-before", "VALID-BEFORE"),
+        _product("valid-after", "VALID-AFTER"),
+    ]
+    items = list(valid)
+    items.insert(failure_index, failing)
+    service = await _make_service(db_session, _make_client(settings, {"data": items}), settings)
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_processed == 2
+    assert result.items_created == 2
+    assert result.items_failed == 1
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "valid-before"))
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "valid-after"))
+    seed_a = await db_session.scalar(select(Product).where(Product.bling_id == "seed-a"))
+    assert seed_a is not None
+    assert seed_a.sku == "SEED-A"
+    log = await db_session.scalar(
+        select(SyncLog).where(SyncLog.entity == "products").order_by(SyncLog.started_at.desc())
+    )
+    assert log is not None
+    assert log.status == "completed"
+    assert log.items_failed == 1
+    error = await db_session.scalar(select(SyncError).where(SyncError.sync_log_id == log.id))
+    assert error is not None
+    assert error.external_id == "seed-a"
+    assert error.error_type == "IntegrityError"
+    assert error.error_message == "database constraint violation"
+
+
+async def test_failed_flush_marks_session_inactive_and_skips_current_rollback_guard(
+    db_session: AsyncSession,
+) -> None:
+    category = Category(bling_id="guard-category", name="Guard Category")
+    db_session.add(category)
+    await db_session.flush()
+    db_session.add(
+        Product(
+            bling_id="guard-a",
+            sku="GUARD-SKU",
+            name="Guard A",
+            category_id=category.id,
+        )
+    )
+    await db_session.commit()
+    db_session.add(
+        Product(
+            bling_id="guard-b",
+            sku="GUARD-SKU",
+            name="Guard B",
+            category_id=category.id,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+
+    assert db_session.is_active is False
+    rollback_called = False
+    if db_session.is_active:
+        rollback_called = True
+        await db_session.rollback()
+    assert rollback_called is False
+    await db_session.rollback()
+    assert db_session.is_active is True
+
+
+async def test_sync_products_isolates_multiple_interleaved_failures(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    await _seed_sku_conflict(db_session)
+    items = [
+        _product("valid-1", "VALID-1"),
+        _product("seed-a", "SEED-B", "Conflito 1"),
+        _product("valid-2", "VALID-2"),
+        _product("seed-a", "SEED-B", "Conflito 2"),
+        _product("valid-3", "VALID-3"),
+    ]
+    service = await _make_service(db_session, _make_client(settings, {"data": items}), settings)
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert result.items_created == 3
+    assert result.items_failed == 2
+    for bling_id in ("valid-1", "valid-2", "valid-3"):
+        assert await db_session.scalar(select(Product).where(Product.bling_id == bling_id))
+    log = await db_session.scalar(
+        select(SyncLog).where(SyncLog.entity == "products").order_by(SyncLog.started_at.desc())
+    )
+    assert log is not None
+    errors = (
+        (await db_session.execute(select(SyncError).where(SyncError.sync_log_id == log.id)))
+        .scalars()
+        .all()
+    )
+    assert len(errors) == 2
+
+
+async def test_sync_products_rejects_duplicate_sku_for_different_bling_id(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    await _seed_sku_conflict(db_session)
+    incoming = _product("different-bling-id", "SEED-B", "Produto Conflitante")
+    service = await _make_service(
+        db_session, _make_client(settings, {"data": [incoming]}), settings
+    )
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert result.items_processed == 0
+    assert result.items_updated == 0
+    assert result.items_failed == 1
+    existing = await db_session.scalar(select(Product).where(Product.sku == "SEED-B"))
+    assert existing is not None
+    assert existing.bling_id == "seed-b"
+    assert existing.name == "Seed B"
+    assert (
+        await db_session.scalar(select(Product).where(Product.bling_id == "different-bling-id"))
+        is None
+    )
+    error = await db_session.scalar(select(SyncError).where(SyncError.entity == "products"))
+    assert error is not None
+    assert error.error_type == "DuplicateSkuError"
+    assert error.error_message == "SKU already belongs to a different Bling product"
+
+
+async def test_sync_products_continues_when_error_recording_fails(
+    db_session: AsyncSession,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = [
+        _product("valid-1", "VALID-1"),
+        _product("broken", "BROKEN"),
+        _product("valid-2", "VALID-2"),
+    ]
+    service = await _make_service(db_session, _make_client(settings, {"data": items}), settings)
+    original_upsert = service._upsert_product
+
+    async def failing_upsert(raw: dict[str, Any]) -> str:
+        if raw["id"] == "broken":
+            raise ValueError("invalid product value")
+        return await original_upsert(raw)
+
+    async def failing_record_error(*args: Any, **kwargs: Any) -> None:
+        raise IntegrityError("insert sync error", {}, RuntimeError("observability unavailable"))
+
+    monkeypatch.setattr(service, "_upsert_product", failing_upsert)
+    monkeypatch.setattr(service, "_record_error", failing_record_error)
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 2
+    assert result.items_failed == 1
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "valid-1"))
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "valid-2"))
+    log = await db_session.scalar(
+        select(SyncLog).where(SyncLog.entity == "products").order_by(SyncLog.started_at.desc())
+    )
+    assert log is not None
+    assert log.items_failed == 1
+
+
+async def test_sync_products_continues_when_skip_recording_fails(
+    db_session: AsyncSession,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = [
+        _product("valid-1", "VALID-1"),
+        {"id": "incomplete", "codigo": "", "nome": "Sem SKU"},
+        _product("valid-2", "VALID-2"),
+    ]
+    service = await _make_service(db_session, _make_client(settings, {"data": items}), settings)
+
+    async def failing_record_skip(*args: Any, **kwargs: Any) -> None:
+        raise IntegrityError("insert sync skip", {}, RuntimeError("observability unavailable"))
+
+    monkeypatch.setattr(service, "_record_skip", failing_record_skip)
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 2
+    assert result.items_skipped == 1
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "valid-1"))
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "valid-2"))
+    log = await db_session.scalar(
+        select(SyncLog).where(SyncLog.entity == "products").order_by(SyncLog.started_at.desc())
+    )
+    assert log is not None
+    assert log.items_created == 2
+
+
+def test_safe_error_details_redacts_credentials() -> None:
+    error_type, message = BlingSyncService._safe_error_details(
+        ValueError(
+            "Authorization: Bearer topsecret\n"
+            "password=correct horse battery staple\n"
+            "access_token=secret"
+        )
+    )
+
+    assert error_type == "ValueError"
+    assert "secret" not in message
+    assert "correct" not in message
+    assert "horse" not in message
+    assert "topsecret" not in message
+    assert message.count("[REDACTED]") == 3
+
+    _, dictionary_message = BlingSyncService._safe_error_details(
+        ValueError(
+            "{'refresh_token': 'REFRESH-SECRET', "
+            '"client_secret": "CLIENT-SECRET", "name": "Produto"}'
+        )
+    )
+    assert "REFRESH-SECRET" not in dictionary_message
+    assert "CLIENT-SECRET" not in dictionary_message
+    assert dictionary_message.count("[REDACTED]") == 2
+    assert "Produto" in dictionary_message
+
+
+def test_safe_raw_data_redacts_nested_credentials() -> None:
+    raw = {
+        "id": "product-1",
+        "access_token": "secret",
+        "nested": {"client_secret": "other", "name": "Produto"},
+        "items": [{"authorization": "Bearer token", "sku": "SKU-1"}],
+    }
+
+    sanitized = BlingSyncService._safe_raw_data(raw)
+
+    assert sanitized == {
+        "id": "product-1",
+        "access_token": "[REDACTED]",
+        "nested": {"client_secret": "[REDACTED]", "name": "Produto"},
+        "items": [{"authorization": "[REDACTED]", "sku": "SKU-1"}],
+    }
+
+
+async def test_sync_products_continues_three_pages_after_middle_constraint_failure(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    await _seed_sku_conflict(db_session)
+    pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = request.url.params["pagina"]
+        pages.append(page)
+        if page == "1":
+            items = [_product(f"page-1-{i}", f"PAGE-1-{i}") for i in range(100)]
+        elif page == "2":
+            items = [_product(f"page-2-{i}", f"PAGE-2-{i}") for i in range(100)]
+            items[50] = _product("seed-a", "SEED-B", "Conflito de SKU")
+        else:
+            items = [_product("page-3-1", "PAGE-3-1")]
+        return httpx.Response(200, json={"data": items})
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    service = await _make_service(db_session, BlingApiClient(settings, client=http), settings)
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert pages == ["1", "2", "3"]
+    assert result.items_created == 200
+    assert result.items_failed == 1
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "page-1-0"))
+    assert await db_session.scalar(select(Product).where(Product.bling_id == "page-3-1"))
+
+
+async def test_sync_products_finalizes_failed_log_after_summary_flush_error(
+    db_session: AsyncSession,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = await _make_service(db_session, _make_client(settings, {"data": []}), settings)
+    original_flush = db_session.flush
+    flush_calls = 0
+
+    async def fail_completed_status_flush(*args: Any, **kwargs: Any) -> None:
+        nonlocal flush_calls
+        flush_calls += 1
+        if flush_calls == 2:
+            assert service._active_log is not None
+            service._active_log.status = "invalid"
+        await original_flush(*args, **kwargs)
+
+    monkeypatch.setattr(db_session, "flush", fail_completed_status_flush)
+
+    result = await service.sync_products()
+    await db_session.commit()
+
+    assert result.status == "failed"
+    assert result.error_message == "sync log finalization failed"
+    log = await db_session.scalar(
+        select(SyncLog).where(SyncLog.entity == "products").order_by(SyncLog.started_at.desc())
+    )
+    assert log is not None
+    assert log.status == "failed"
+    assert log.error_message == "sync log finalization failed"
+
+
 async def test_sync_orders_empty_payload_completes(
     db_session: AsyncSession,
     settings: Settings,
@@ -497,6 +850,13 @@ async def test_sync_api_error_marks_log_failed(
 
     assert result.status == "failed"
     assert result.items_processed == 0
+    log = await db_session.scalar(
+        select(SyncLog).where(SyncLog.entity == "products").order_by(SyncLog.started_at.desc())
+    )
+    assert log is not None
+    assert log.status == "failed"
+    assert log.finished_at is not None
+    assert log.error_message == "list resource failed with status 500"
 
 
 async def test_sync_orders_persists_order_and_items(
@@ -579,6 +939,75 @@ async def test_sync_orders_item_without_product_keeps_order_and_records_error(
     )
     assert log is not None
     assert log.items_failed == 0
+
+
+async def test_sync_orders_keeps_order_when_item_error_recording_fails(
+    db_session: AsyncSession,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 9003,
+                "numero": "1003",
+                "contato": {"nome": "Cliente C"},
+                "total": {"valor": 20.0},
+                "itens": [{"codigo": "UNKNOWN-SKU", "quantidade": 1, "valor": 20.0}],
+            }
+        ]
+    }
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+
+    async def failing_record_item_error(*args: Any, **kwargs: Any) -> None:
+        raise IntegrityError("insert item error", {}, RuntimeError("observability unavailable"))
+
+    monkeypatch.setattr(service, "_record_item_error", failing_record_item_error)
+
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    assert result.items_failed == 0
+    order = await db_session.scalar(select(Order).where(Order.external_id == "9003"))
+    assert order is not None
+    assert order.items == []
+
+
+async def test_sync_orders_preserves_unknown_product_error_when_later_item_fails(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    await _seed_sku_conflict(db_session)
+    payload = {
+        "data": [
+            {
+                "id": 9004,
+                "numero": "1004",
+                "contato": {"nome": "Cliente D"},
+                "total": {"valor": 20.0},
+                "itens": [
+                    {"codigo": "UNKNOWN-SKU", "quantidade": 1, "valor": 10.0},
+                    {"codigo": "SEED-A", "quantidade": "invalid", "valor": 10.0},
+                ],
+            }
+        ]
+    }
+    service = await _make_service(db_session, _make_client(settings, payload), settings)
+
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_failed == 1
+    errors = (await db_session.execute(select(SyncError))).scalars().all()
+    assert {error.error_type for error in errors} == {
+        "ValueError",
+        "order_item_unknown_product",
+    }
+    unknown = next(error for error in errors if error.error_type == "order_item_unknown_product")
+    assert unknown.error_message == "order item product not found for sku=UNKNOWN-SKU"
 
 
 async def test_sync_marketplaces_creates_and_updates_channels(

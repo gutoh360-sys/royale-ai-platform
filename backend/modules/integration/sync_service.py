@@ -1,8 +1,12 @@
+import contextlib
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+
+from sqlalchemy.exc import IntegrityError
 
 from backend.core.config.base import Settings
 from backend.core.logging import get_logger
@@ -27,6 +31,24 @@ def decimal_of(value: Any) -> Decimal:
 
 UNCATEGORIZED_ID = "uncategorized"
 UNCATEGORIZED_NAME = "Sem categoria"
+
+_SENSITIVE_ERROR_VALUE = re.compile(
+    r"(?im)\b(access_token|refresh_token|client_secret|authorization|password)\b"
+    r"(\s*[:=]\s*)[^\r\n,;]*"
+)
+_SENSITIVE_QUOTED_ERROR_VALUE = re.compile(
+    r"(?i)(?P<key_quote>['\"])(?P<key>access_token|refresh_token|client_secret|"
+    r"authorization|password)(?P=key_quote)(?P<separator>\s*[:=]\s*)"
+    r"(?P<value_quote>['\"])[^'\"]*(?P=value_quote)"
+)
+_BEARER_TOKEN = re.compile(r"(?i)bearer\s+[^\s,;]+")
+_SENSITIVE_ERROR_KEYS = {
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "authorization",
+    "password",
+}
 
 VALID_ENTITIES = (
     "products",
@@ -58,6 +80,10 @@ class ProductIncompleteError(IncompleteSyncItemError):
     """Raised when a Bling product is missing required cadastral fields."""
 
 
+class DuplicateSkuError(ValueError):
+    """Raised when different Bling products use the same SKU."""
+
+
 class OrderItemUnknownProductError(ValueError):
     """Raised when an order item references a product not present in the catalog."""
 
@@ -82,6 +108,7 @@ class BlingSyncService:
         self._logger = get_logger(__name__)
         self._situation_cache: dict[str, str] = {}
         self._active_log: SyncLog | None = None
+        self._deferred_item_errors: list[tuple[dict[str, Any], str]] = []
 
     @staticmethod
     def _now() -> datetime:
@@ -196,11 +223,17 @@ class BlingSyncService:
         try:
             items = await fetch()
         except Exception as exc:
-            log.status = "failed"
-            log.error_message = str(exc)
-            log.finished_at = self._now()
-            await self._data_repo.session.flush()
-            self._logger.error(f"bling_sync_{entity}_fetch_failed", error=str(exc))
+            _, fetch_error_message = self._safe_error_details(exc)
+            await self._finalize_log(
+                log,
+                status="failed",
+                processed=0,
+                created=0,
+                updated=0,
+                failed=0,
+                error_message=fetch_error_message,
+            )
+            self._log_failure_safely(f"bling_sync_{entity}_fetch_failed", entity=entity, cause=exc)
             return SyncResult(
                 entity=entity,
                 sync_type=sync_type,
@@ -210,53 +243,113 @@ class BlingSyncService:
                 items_updated=0,
                 items_failed=0,
                 items_skipped=0,
-                error_message=str(exc),
+                error_message=fetch_error_message,
             )
 
         for raw in items:
             try:
-                outcome = await upsert(raw)
+                async with self._data_repo.session.begin_nested():
+                    outcome = await upsert(raw)
             except IncompleteSyncItemError as exc:
                 skipped += 1
-                if self._data_repo.session.is_active:
-                    await self._data_repo.session.rollback()
-                await self._record_skip(log, entity=entity, raw=raw, reason=str(exc))
+                await self._record_skip_safely(log, entity=entity, raw=raw, reason=str(exc))
                 continue
-            except Exception:
+            except Exception as exc:
                 failed += 1
-                if self._data_repo.session.is_active:
-                    await self._data_repo.session.rollback()
-                await self._record_error(log, entity=entity, raw=raw)
+                self._log_failure_safely("bling_sync_item_failed", entity=entity, cause=exc)
+                await self._record_error_safely(log, entity=entity, raw=raw, cause=exc)
                 continue
+            finally:
+                await self._record_deferred_item_errors()
             processed += 1
             if outcome == "created":
                 created += 1
             elif outcome == "updated":
                 updated += 1
 
-        log.items_processed = processed
-        log.items_created = created
-        log.items_updated = updated
-        log.items_failed = failed
-        log.status = "completed"
-        log.finished_at = self._now()
-        try:
-            await self._data_repo.session.flush()
-        except Exception as exc:
-            log.status = "failed"
-            log.error_message = f"flush failed: {exc}"
-            self._logger.error(f"bling_sync_{entity}_flush_failed", error=str(exc))
+        result_status, error_message = await self._finalize_log(
+            log,
+            status="completed",
+            processed=processed,
+            created=created,
+            updated=updated,
+            failed=failed,
+        )
         return SyncResult(
             entity=entity,
             sync_type=sync_type,
-            status=log.status,
+            status=result_status,
             items_processed=processed,
             items_created=created,
             items_updated=updated,
             items_failed=failed,
             items_skipped=skipped,
-            error_message=log.error_message,
+            error_message=error_message,
         )
+
+    async def _finalize_log(
+        self,
+        log: SyncLog,
+        *,
+        status: str,
+        processed: int,
+        created: int,
+        updated: int,
+        failed: int,
+        error_message: str | None = None,
+    ) -> tuple[str, str | None]:
+        entity = log.entity
+        try:
+            async with self._data_repo.session.begin_nested():
+                self._set_log_result(
+                    log,
+                    status=status,
+                    processed=processed,
+                    created=created,
+                    updated=updated,
+                    failed=failed,
+                    error_message=error_message,
+                )
+                await self._data_repo.session.flush()
+            return status, error_message
+        except Exception as exc:
+            self._log_failure_safely("bling_sync_log_finalization_failed", entity=entity, cause=exc)
+
+        fallback_message = "sync log finalization failed"
+        try:
+            async with self._data_repo.session.begin_nested():
+                self._set_log_result(
+                    log,
+                    status="failed",
+                    processed=processed,
+                    created=created,
+                    updated=updated,
+                    failed=failed,
+                    error_message=fallback_message,
+                )
+                await self._data_repo.session.flush()
+        except Exception as exc:
+            self._log_failure_safely("bling_sync_log_fallback_failed", entity=entity, cause=exc)
+        return "failed", fallback_message
+
+    def _set_log_result(
+        self,
+        log: SyncLog,
+        *,
+        status: str,
+        processed: int,
+        created: int,
+        updated: int,
+        failed: int,
+        error_message: str | None,
+    ) -> None:
+        log.items_processed = processed
+        log.items_created = created
+        log.items_updated = updated
+        log.items_failed = failed
+        log.status = status
+        log.error_message = error_message
+        log.finished_at = self._now()
 
     async def _upsert_product(self, raw: dict[str, Any]) -> str:
         bling_id = str(raw.get("id") or "").strip()
@@ -280,9 +373,7 @@ class BlingSyncService:
         else:
             existing = await self._data_repo.find_product_by_sku(sku)
             if existing is not None:
-                product = existing
-                product.bling_id = bling_id
-                action = "updated"
+                raise DuplicateSkuError("SKU already belongs to a different Bling product")
             else:
                 product = Product(bling_id=bling_id, sku=sku, name=name)
                 action = "created"
@@ -566,7 +657,7 @@ class BlingSyncService:
                 try:
                     await self._upsert_order_item(order, item)
                 except OrderItemUnknownProductError as exc:
-                    await self._record_item_error(item, reason=str(exc))
+                    self._deferred_item_errors.append((item, str(exc)))
         await self._data_repo.session.flush()
         return action
 
@@ -639,17 +730,94 @@ class BlingSyncService:
         self._situation_cache[situation_id] = description
         return description
 
-    async def _record_error(self, log: SyncLog, entity: str, raw: dict[str, Any]) -> None:
+    async def _record_error_safely(
+        self,
+        log: SyncLog,
+        entity: str,
+        raw: dict[str, Any],
+        cause: Exception,
+    ) -> None:
+        try:
+            async with self._data_repo.session.begin_nested():
+                await self._record_error(log, entity=entity, raw=raw, cause=cause)
+        except Exception as exc:
+            self._log_failure_safely("bling_sync_error_record_failed", entity=entity, cause=exc)
+
+    async def _record_error(
+        self,
+        log: SyncLog,
+        entity: str,
+        raw: dict[str, Any],
+        cause: Exception,
+    ) -> None:
+        error_type, error_message = self._safe_error_details(cause)
         error = SyncError(
             sync_log_id=log.id,
             entity=entity,
             external_id=str(raw.get("id") or "")[:50],
-            error_type="item_sync_error",
-            error_message="Failed to sync item",
-            raw_data=raw,
+            error_type=error_type,
+            error_message=error_message,
+            raw_data=self._safe_raw_data(raw),
         )
         self._data_repo.session.add(error)
         await self._data_repo.session.flush()
+
+    @staticmethod
+    def _safe_error_details(cause: Exception) -> tuple[str, str]:
+        error_type = type(cause).__name__[:50]
+        if isinstance(cause, IntegrityError):
+            return error_type, "database constraint violation"
+        message = str(cause).strip() or "item processing failed"
+        message = _SENSITIVE_QUOTED_ERROR_VALUE.sub(
+            lambda match: (
+                f"{match.group('key_quote')}{match.group('key')}"
+                f"{match.group('key_quote')}{match.group('separator')}"
+                f"{match.group('value_quote')}[REDACTED]{match.group('value_quote')}"
+            ),
+            message,
+        )
+        message = _SENSITIVE_ERROR_VALUE.sub(r"\1\2[REDACTED]", message)
+        message = _BEARER_TOKEN.sub("Bearer [REDACTED]", message)
+        return error_type, message[:2000]
+
+    @classmethod
+    def _safe_raw_data(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): "[REDACTED]"
+                if str(key).lower() in _SENSITIVE_ERROR_KEYS
+                else cls._safe_raw_data(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._safe_raw_data(item) for item in value]
+        return value
+
+    def _log_failure_safely(self, event: str, *, entity: str, cause: Exception) -> None:
+        with contextlib.suppress(Exception):
+            error_type, error_message = self._safe_error_details(cause)
+            sanitized = RuntimeError(f"{error_type}: {error_message}")
+            self._logger.error(
+                event,
+                entity=entity,
+                error_type=error_type,
+                error_message=error_message,
+                exc_info=(RuntimeError, sanitized, cause.__traceback__),
+            )
+
+    async def _record_item_error_safely(self, raw: dict[str, Any], reason: str) -> None:
+        try:
+            async with self._data_repo.session.begin_nested():
+                await self._record_item_error(raw, reason=reason)
+        except Exception as exc:
+            self._log_failure_safely(
+                "bling_sync_order_item_error_record_failed", entity="orders", cause=exc
+            )
+
+    async def _record_deferred_item_errors(self) -> None:
+        errors, self._deferred_item_errors = self._deferred_item_errors, []
+        for raw, reason in errors:
+            await self._record_item_error_safely(raw, reason=reason)
 
     async def _record_item_error(self, raw: dict[str, Any], reason: str) -> None:
         log = self._active_log
@@ -661,7 +829,7 @@ class BlingSyncService:
             external_id=str(raw.get("id") or "")[:50],
             error_type="order_item_unknown_product",
             error_message=reason,
-            raw_data=raw,
+            raw_data=self._safe_raw_data(raw),
         )
         self._data_repo.session.add(error)
         await self._data_repo.session.flush()
@@ -675,10 +843,19 @@ class BlingSyncService:
             external_id=str(raw.get("id") or "")[:50],
             error_type="product_incomplete",
             error_message=reason,
-            raw_data=raw,
+            raw_data=self._safe_raw_data(raw),
         )
         self._data_repo.session.add(error)
         await self._data_repo.session.flush()
+
+    async def _record_skip_safely(
+        self, log: SyncLog, entity: str, raw: dict[str, Any], reason: str
+    ) -> None:
+        try:
+            async with self._data_repo.session.begin_nested():
+                await self._record_skip(log, entity=entity, raw=raw, reason=reason)
+        except Exception as exc:
+            self._log_failure_safely("bling_sync_skip_record_failed", entity=entity, cause=exc)
 
     @staticmethod
     def _clean_ean(value: Any) -> str | None:
