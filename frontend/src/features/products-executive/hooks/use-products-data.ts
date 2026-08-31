@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import type { ProductsDataResult } from "@/features/products-executive/types"
-import { MockProductsDataService } from "@/features/products-executive/services/products-data-service"
+import { fetchProductsData } from "@/services/api-products"
 
 export function useProductsData(): ProductsDataResult {
   const [result, setResult] = useState<ProductsDataResult>({
@@ -31,10 +31,7 @@ export function useProductsData(): ProductsDataResult {
   })
 
   useEffect(() => {
-    const service = new MockProductsDataService()
-    service.fetch().then((res) => {
-      setResult(res)
-    })
+    fetchProductsData().then(setResult)
   }, [])
 
   return result

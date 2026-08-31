@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { InventoryDataResult } from "@/features/inventory-executive/types";
-import { MockInventoryDataService } from "@/features/inventory-executive/services/inventory-data-service";
+import { fetchInventoryData } from "@/services/api-inventory";
 
 export function useInventoryData(): InventoryDataResult {
   const [result, setResult] = useState<InventoryDataResult>({
@@ -12,10 +12,7 @@ export function useInventoryData(): InventoryDataResult {
   });
 
   useEffect(() => {
-    const service = new MockInventoryDataService();
-    service.fetch().then((res) => {
-      setResult(res);
-    });
+    fetchInventoryData().then(setResult);
   }, []);
 
   return result;

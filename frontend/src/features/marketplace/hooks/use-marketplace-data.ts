@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { MarketplaceDataResult } from "@/features/marketplace/types";
-import { MockMarketplaceDataService } from "@/features/marketplace/services/marketplace-data-service";
+import { fetchMarketplaceData } from "@/services/api-marketplace";
 
 export function useMarketplaceData(): MarketplaceDataResult {
   const [result, setResult] = useState<MarketplaceDataResult>({
@@ -22,11 +22,7 @@ export function useMarketplaceData(): MarketplaceDataResult {
   });
 
   useEffect(() => {
-    const service = new MockMarketplaceDataService();
-
-    service.fetch().then((res) => {
-      setResult(res);
-    });
+    fetchMarketplaceData().then(setResult);
   }, []);
 
   return result;

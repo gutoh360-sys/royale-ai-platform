@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { CommandCenterResult } from "@/features/dashboard/executive-command-center/types";
-import { MockExecutiveCommandCenterService } from "@/features/dashboard/executive-command-center/services/command-center-service";
+import { fetchCommandCenterData } from "@/services/api-command-center";
 
 export function useExecutiveCommandCenter(): CommandCenterResult {
   const [result, setResult] = useState<CommandCenterResult>({
@@ -17,11 +17,7 @@ export function useExecutiveCommandCenter(): CommandCenterResult {
   });
 
   useEffect(() => {
-    const service = new MockExecutiveCommandCenterService();
-
-    service.fetch().then((res) => {
-      setResult(res);
-    });
+    fetchCommandCenterData().then(setResult);
   }, []);
 
   return result;
