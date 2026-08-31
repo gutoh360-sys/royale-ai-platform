@@ -218,10 +218,14 @@ class BlingSyncService:
                 outcome = await upsert(raw)
             except IncompleteSyncItemError as exc:
                 skipped += 1
+                if self._data_repo.session.is_active:
+                    await self._data_repo.session.rollback()
                 await self._record_skip(log, entity=entity, raw=raw, reason=str(exc))
                 continue
             except Exception:
                 failed += 1
+                if self._data_repo.session.is_active:
+                    await self._data_repo.session.rollback()
                 await self._record_error(log, entity=entity, raw=raw)
                 continue
             processed += 1
