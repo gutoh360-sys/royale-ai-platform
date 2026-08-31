@@ -712,14 +712,38 @@ class BlingSyncService:
         if raw.get("total") is not None:
             item.total_price = float(raw["total"])
 
+    _BLING_VALOR_TO_STATUS: dict[int, str] = {
+        0: "pending",
+        1: "completed",
+        2: "cancelled",
+        3: "pending",
+        5: "pending",
+        6: "pending",
+        7: "pending",
+        8: "pending",
+        10: "pending",
+        11: "pending",
+        12: "pending",
+    }
+
     async def _order_status(self, raw: dict[str, Any]) -> str:
         situation = raw.get("situacao") or {}
         if isinstance(situation, dict):
+            valor = situation.get("valor")
+            if isinstance(valor, int):
+                mapped = self._BLING_VALOR_TO_STATUS.get(valor)
+                if mapped is not None:
+                    return mapped
+                self._logger.warning(
+                    "Unknown Bling situation valor=%s, defaulting to pending",
+                    valor,
+                )
+                return "pending"
             description = str(situation.get("descricao") or "").lower()
             situation_id = situation.get("id")
             if not description and situation_id is not None:
                 description = await self._situation_description(str(situation_id))
-            if "conclu" in description or "finaliz" in description:
+            if "conclu" in description or "finaliz" in description or "atendido" in description:
                 return "completed"
             if "cancel" in description:
                 return "cancelled"

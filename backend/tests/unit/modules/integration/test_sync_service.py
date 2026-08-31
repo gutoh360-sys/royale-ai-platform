@@ -1423,3 +1423,288 @@ async def test_sync_listings_empty_channels(
     assert result.status == "completed"
     assert result.items_processed == 0
     assert result.items_created == 0
+
+
+def _order_client(
+    settings: Settings,
+    orders_payload: dict[str, Any],
+    situations: dict[str, dict[str, Any]] | None = None,
+) -> BlingApiClient:
+    """Client that serves order listing + per-id situation resolution."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/Api/v3/pedidos/vendas":
+            return httpx.Response(200, json=orders_payload)
+        if situations and request.url.path.startswith("/Api/v3/situacoes/"):
+            sid = request.url.path.split("/")[-1]
+            data = situations.get(sid)
+            if data is not None:
+                return httpx.Response(200, json={"data": data})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    return BlingApiClient(settings, client=http)
+
+
+async def test_order_status_uses_valor_em_aberto(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """situacao.valor=0 (Em aberto) -> pending."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 5001,
+                "numero": "2001",
+                "contato": {"nome": "Cli A"},
+                "total": {"valor": 50.0},
+                "situacao": {"id": 9, "valor": 0},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    order = await db_session.scalar(select(Order).where(Order.external_id == "5001"))
+    assert order is not None
+    assert order.status == "pending"
+
+
+async def test_order_status_uses_valor_atendido(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """situacao.valor=1 (Atendido) -> completed."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 5002,
+                "numero": "2002",
+                "contato": {"nome": "Cli B"},
+                "total": {"valor": 120.0},
+                "situacao": {"id": 10, "valor": 1},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    order = await db_session.scalar(select(Order).where(Order.external_id == "5002"))
+    assert order is not None
+    assert order.status == "completed"
+
+
+async def test_order_status_uses_valor_cancelado(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """situacao.valor=2 (Cancelado) -> cancelled."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 5003,
+                "numero": "2003",
+                "contato": {"nome": "Cli C"},
+                "total": {"valor": 80.0},
+                "situacao": {"id": 11, "valor": 2},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    order = await db_session.scalar(select(Order).where(Order.external_id == "5003"))
+    assert order is not None
+    assert order.status == "cancelled"
+
+
+async def test_order_status_mix_of_situations(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Multiple orders with different Bling situations map correctly."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 5010,
+                "numero": "2010",
+                "contato": {"nome": "Cli X"},
+                "total": {"valor": 100.0},
+                "situacao": {"id": 9, "valor": 0},
+                "itens": [],
+            },
+            {
+                "id": 5011,
+                "numero": "2011",
+                "contato": {"nome": "Cli Y"},
+                "total": {"valor": 200.0},
+                "situacao": {"id": 10, "valor": 1},
+                "itens": [],
+            },
+            {
+                "id": 5012,
+                "numero": "2012",
+                "contato": {"nome": "Cli Z"},
+                "total": {"valor": 150.0},
+                "situacao": {"id": 11, "valor": 2},
+                "itens": [],
+            },
+            {
+                "id": 5013,
+                "numero": "2013",
+                "contato": {"nome": "Cli W"},
+                "total": {"valor": 75.0},
+                "situacao": {"id": 12, "valor": 3},
+                "itens": [],
+            },
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 4
+
+    statuses = {}
+    for ext_id in ["5010", "5011", "5012", "5013"]:
+        o = await db_session.scalar(select(Order).where(Order.external_id == ext_id))
+        assert o is not None
+        statuses[ext_id] = o.status
+
+    assert statuses["5010"] == "pending"
+    assert statuses["5011"] == "completed"
+    assert statuses["5012"] == "cancelled"
+    assert statuses["5013"] == "pending"
+
+
+async def test_order_status_fallback_to_situacoes_api(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """When valor is missing, fallback to GET /situacoes/{id} nome."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 5020,
+                "numero": "2020",
+                "contato": {"nome": "Cli Fallback"},
+                "total": {"valor": 60.0},
+                "situacao": {"id": 99},
+                "itens": [],
+            }
+        ],
+    }
+    situations = {"99": {"id": 99, "nome": "Atendido"}}
+    client = _order_client(settings, payload, situations=situations)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    order = await db_session.scalar(select(Order).where(Order.external_id == "5020"))
+    assert order is not None
+    assert order.status == "completed"
+
+
+async def test_order_status_unknown_situation_falls_back_to_pending(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Unknown situation valor -> pending, no crash."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 5030,
+                "numero": "2030",
+                "contato": {"nome": "Cli Unknown"},
+                "total": {"valor": 40.0},
+                "situacao": {"id": 999, "valor": 99},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    order = await db_session.scalar(select(Order).where(Order.external_id == "5030"))
+    assert order is not None
+    assert order.status == "pending"
+
+
+async def test_order_resync_updates_existing_order_status(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Re-syncing an order updates its status (idempotent)."""
+    from backend.database.models.order import Order
+
+    payload_v1 = {
+        "data": [
+            {
+                "id": 5040,
+                "numero": "2040",
+                "contato": {"nome": "Cli Resync"},
+                "total": {"valor": 90.0},
+                "situacao": {"id": 9, "valor": 0},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload_v1)
+    service = await _make_service(db_session, client, settings)
+    result1 = await service.sync_orders()
+    await db_session.commit()
+    assert result1.items_created == 1
+
+    payload_v2 = {
+        "data": [
+            {
+                "id": 5040,
+                "numero": "2040",
+                "contato": {"nome": "Cli Resync"},
+                "total": {"valor": 90.0},
+                "situacao": {"id": 10, "valor": 1},
+                "itens": [],
+            }
+        ],
+    }
+    client2 = _order_client(settings, payload_v2)
+    service2 = await _make_service(db_session, client2, settings)
+    result2 = await service2.sync_orders()
+    await db_session.commit()
+
+    assert result2.items_updated == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "5040"))
+    assert order is not None
+    assert order.status == "completed"
