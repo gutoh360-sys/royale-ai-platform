@@ -174,22 +174,32 @@ class BlingSyncService:
 
         Bling requires ``idLoja`` and ``tipoIntegracao`` when listing anuncios,
         so we iterate over the channels persisted by ``sync_marketplaces``.
+        Each channel is fetched independently so a 400 from one channel does
+        not abort the others.
         """
         channels = await self._data_repo.list_channels()
         items: list[dict[str, Any]] = []
         for channel in channels:
             if not channel.tipo:
                 continue
-            channel_items = await self._client.fetch_listings(
-                self._token_provider,
-                id_loja=channel.bling_id,
-                tipo_integracao=channel.tipo,
-                page_size=self._settings.BLING_SYNC_PAGE_SIZE,
-            )
-            for item in channel_items:
-                item["_channel_bling_id"] = channel.bling_id
-                item["_tipo_integracao"] = channel.tipo
-            items.extend(channel_items)
+            try:
+                channel_items = await self._client.fetch_listings(
+                    self._token_provider,
+                    id_loja=channel.bling_id,
+                    tipo_integracao=channel.tipo,
+                    page_size=self._settings.BLING_SYNC_PAGE_SIZE,
+                )
+                for item in channel_items:
+                    item["_channel_bling_id"] = channel.bling_id
+                    item["_tipo_integracao"] = channel.tipo
+                items.extend(channel_items)
+            except ApiError as exc:
+                self._logger.warning(
+                    "Skipping channel %s/%s: %s",
+                    channel.bling_id,
+                    channel.tipo,
+                    exc,
+                )
         return items
 
     async def sync_orders(self) -> SyncResult:

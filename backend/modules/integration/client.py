@@ -181,7 +181,23 @@ class BlingApiClient:
             query["pagina"] = page
             response = await self.get_authenticated(path, token_provider, query)
             if response.status_code != 200:
-                raise ApiError(f"list resource failed with status {response.status_code}")
+                details: str | None = None
+                try:
+                    error_body = response.json()
+                    error_info = error_body.get("error") if isinstance(error_body, dict) else None
+                    if isinstance(error_info, dict):
+                        parts = [
+                            error_info.get("type", ""),
+                            error_info.get("message", ""),
+                            error_info.get("description", ""),
+                        ]
+                        sanitized = " - ".join(p for p in parts if p)
+                        if sanitized:
+                            details = sanitized
+                except Exception:
+                    pass
+                suffix = f" ({details})" if details else ""
+                raise ApiError(f"list resource failed with status {response.status_code}{suffix}")
             body = response.json()
             payload = body.get("data")
             page_item_count = 0
@@ -282,7 +298,7 @@ class BlingApiClient:
         """
         params: dict[str, str | int] = {
             "limite": page_size,
-            "idLoja": id_loja,
+            "idLoja": int(id_loja),
             "tipoIntegracao": tipo_integracao,
         }
         return await self.list_resource("/anuncios", token_provider, params, max_pages=max_pages)

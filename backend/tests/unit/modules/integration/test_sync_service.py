@@ -1214,3 +1214,212 @@ async def test_sync_listings_skips_when_no_channel_synced(
     assert result.items_created == 0
     assert result.items_processed == 0
     assert await db_session.scalar(select(Listing).where(Listing.bling_id == "101")) is None
+
+
+async def test_sync_listings_isolates_per_channel_on_400(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.listing import Listing
+    from backend.database.models.sales_channel import SalesChannel
+
+    db_session.add_all(
+        [
+            SalesChannel(bling_id="10", name="ML", tipo="MERCADO_LIVRE", agrupador=3),
+            SalesChannel(bling_id="20", name="Shopee", tipo="SHOPEE", agrupador=3),
+            SalesChannel(bling_id="30", name="Amazon", tipo="Amazon", agrupador=3),
+        ]
+    )
+    await db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        id_loja = params.get("idLoja")
+        if id_loja == "20":
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "type": "VALIDATION_ERROR",
+                        "message": "tipoIntegracao invalido",
+                        "description": "O tipo de integracao SHOPEE nao e suportado para anuncios",
+                    }
+                },
+            )
+        if request.url.path == "/Api/v3/anuncios":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": 100 + int(id_loja or 0),
+                            "titulo": f"Anuncio {id_loja}",
+                            "situacao": 1,
+                            "preco": 49.90,
+                            "codigo": f"EXT-{id_loja}",
+                        }
+                    ]
+                },
+            )
+        if request.url.path.startswith("/Api/v3/anuncios/"):
+            return httpx.Response(
+                200,
+                json={"data": {"id": 200, "produto": {"id": 1}}},
+            )
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    client = BlingApiClient(settings, client=http)
+    service = await _make_service(db_session, client, settings)
+
+    result = await service.sync_listings()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 2
+    assert result.items_failed == 0
+    assert await db_session.scalar(select(Listing).where(Listing.bling_id == "110"))
+    assert await db_session.scalar(select(Listing).where(Listing.bling_id == "130"))
+    assert await db_session.scalar(select(Listing).where(Listing.bling_id == "120")) is None
+
+
+async def test_list_resource_preserves_bling_error_body(
+    settings: Settings,
+) -> None:
+    from backend.modules.integration.errors import ApiError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "type": "VALIDATION_ERROR",
+                    "message": "tipoIntegracao invalido",
+                    "description": "O tipo de integracao XYZ nao e suportado",
+                }
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    client = BlingApiClient(settings, client=http)
+
+    with pytest.raises(ApiError) as exc_info:
+        await client.list_resource("/anuncios", _token_provider, {"limite": 100})
+
+    message = str(exc_info.value)
+    assert "400" in message
+    assert "tipoIntegracao invalido" in message
+    assert "XYZ" in message
+    assert "Bearer" not in message
+    assert "token" not in message.lower() or "token" in "tipoIntegracao"
+
+
+async def test_sync_listings_updates_existing_listing(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.listing import Listing
+    from backend.database.models.sales_channel import SalesChannel
+
+    db_session.add(SalesChannel(bling_id="10", name="ML", tipo="MERCADO_LIVRE", agrupador=3))
+    await db_session.flush()
+
+    existing = Listing(bling_id="100", title="Old Title")
+    db_session.add(existing)
+    await db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/Api/v3/anuncios":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": 100,
+                            "titulo": "Updated Title",
+                            "situacao": 2,
+                            "preco": 99.90,
+                            "codigo": "EXT-100",
+                        }
+                    ]
+                },
+            )
+        if request.url.path.startswith("/Api/v3/anuncios/"):
+            return httpx.Response(200, json={"data": {"id": 200, "produto": {"id": 1}}})
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    client = BlingApiClient(settings, client=http)
+    service = await _make_service(db_session, client, settings)
+
+    result = await service.sync_listings()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_updated == 1
+    assert result.items_created == 0
+    listing = await db_session.scalar(select(Listing).where(Listing.bling_id == "100"))
+    assert listing is not None
+    assert listing.title == "Updated Title"
+    assert listing.status == 2
+
+
+async def test_sync_listings_skips_unknown_product(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    from backend.database.models.listing import Listing
+    from backend.database.models.sales_channel import SalesChannel
+
+    db_session.add(SalesChannel(bling_id="10", name="ML", tipo="MERCADO_LIVRE", agrupador=3))
+    await db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/Api/v3/anuncios":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": 300,
+                            "titulo": "Anuncio Sem Produto",
+                            "situacao": 1,
+                            "preco": 10.00,
+                        }
+                    ]
+                },
+            )
+        if request.url.path.startswith("/Api/v3/anuncios/"):
+            return httpx.Response(200, json={"data": {"id": 999, "produto": {"id": 999}}})
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
+    client = BlingApiClient(settings, client=http)
+    service = await _make_service(db_session, client, settings)
+
+    result = await service.sync_listings()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_created == 1
+    listing = await db_session.scalar(select(Listing).where(Listing.bling_id == "300"))
+    assert listing is not None
+    assert listing.product_id is None
+    assert listing.product_bling_id == "999"
+
+
+async def test_sync_listings_empty_channels(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    service = await _make_service(db_session, _make_client(settings, {"data": []}), settings)
+    result = await service.sync_listings()
+    await db_session.commit()
+
+    assert result.status == "completed"
+    assert result.items_processed == 0
+    assert result.items_created == 0
