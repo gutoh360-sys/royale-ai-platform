@@ -12,6 +12,7 @@ from backend.database.base import Base
 
 if TYPE_CHECKING:
     from backend.database.models.product import Product
+    from backend.database.models.sales_channel import SalesChannel
 
 
 class Order(Base):
@@ -43,10 +44,16 @@ class Order(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("operational.sales_channels.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     items: Mapped[list[OrderItem]] = relationship(
         "OrderItem", back_populates="order", cascade="all, delete-orphan", lazy="selectin"
     )
+    channel: Mapped[SalesChannel | None] = relationship("SalesChannel", lazy="selectin")
 
 
 class OrderItem(Base):

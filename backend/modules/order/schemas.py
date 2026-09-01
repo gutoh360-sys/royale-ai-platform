@@ -90,4 +90,5 @@ class OrderResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_synced_at: datetime | None
+    channel_id: UUID | None
     items: list[OrderItemResponse]

@@ -1708,3 +1708,97 @@ async def test_order_resync_updates_existing_order_status(
     order = await db_session.scalar(select(Order).where(Order.external_id == "5040"))
     assert order is not None
     assert order.status == "completed"
+
+
+async def test_order_sync_resolves_channel_from_loja(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Order with loja.id matching a sales_channel gets channel_id set."""
+    from backend.database.models.order import Order
+    from backend.database.models.sales_channel import SalesChannel
+
+    channel = SalesChannel(bling_id="42", name="Amazon", tipo="AMAZON", agrupador=3, situacao=1)
+    db_session.add(channel)
+    await db_session.flush()
+
+    payload = {
+        "data": [
+            {
+                "id": 6001,
+                "numero": "3001",
+                "contato": {"nome": "Cliente Loja"},
+                "total": {"valor": 200.0},
+                "loja": {"id": 42, "descricao": "Amazon"},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "6001"))
+    assert order is not None
+    assert order.channel_id == channel.id
+
+
+async def test_order_sync_missing_loja_sets_channel_null(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Order without loja field gets channel_id = null (no failure)."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 6002,
+                "numero": "3002",
+                "contato": {"nome": "Cliente Sem Loja"},
+                "total": {"valor": 50.0},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "6002"))
+    assert order is not None
+    assert order.channel_id is None
+
+
+async def test_order_sync_unknown_loja_sets_channel_null(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """Order with loja.id not matching any sales_channel gets channel_id = null."""
+    from backend.database.models.order import Order
+
+    payload = {
+        "data": [
+            {
+                "id": 6003,
+                "numero": "3003",
+                "contato": {"nome": "Cliente Loja Desconhecida"},
+                "total": {"valor": 75.0},
+                "loja": {"id": 999, "descricao": "Canal Inexistente"},
+                "itens": [],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "6003"))
+    assert order is not None
+    assert order.channel_id is None

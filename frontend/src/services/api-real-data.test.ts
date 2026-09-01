@@ -29,6 +29,17 @@ const channels: SalesChannel[] = [
     updated_at: "2026-08-01T00:00:00Z",
     last_synced_at: "2026-08-01T00:00:00Z",
   },
+  {
+    id: "channel-3",
+    bling_id: "30",
+    name: "Amazon",
+    tipo: "AMAZON",
+    agrupador: 3,
+    situacao: 1,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    last_synced_at: "2026-08-01T00:00:00Z",
+  },
 ];
 
 const orders: Order[] = [
@@ -51,6 +62,7 @@ const orders: Order[] = [
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
     last_synced_at: "2026-08-01T00:00:00Z",
+    channel_id: "channel-1",
     items: [],
   },
   {
@@ -72,6 +84,7 @@ const orders: Order[] = [
     created_at: "2026-08-02T00:00:00Z",
     updated_at: "2026-08-02T00:00:00Z",
     last_synced_at: "2026-08-02T00:00:00Z",
+    channel_id: "channel-2",
     items: [],
   },
 ];
@@ -162,9 +175,25 @@ describe("real backend data services", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/backend/sales-channels", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/backend/orders", expect.any(Object));
     expect(result.status).toBe("success");
-    expect(result.marketplaces.map((m) => m.name)).toEqual(["Mercado Livre", "Shopee"]);
+    expect(result.marketplaces.map((m) => m.name)).toEqual(["Mercado Livre", "Shopee", "Amazon"]);
     expect(result.summary.totalRevenue).not.toContain("NaN");
     expect(result.summary.averageTicket).not.toContain("NaN");
+  });
+
+  it("matches orders to marketplace groups via channel_id", async () => {
+    stubBackendReads();
+
+    const result = await fetchMarketplaceData();
+
+    expect(result.status).toBe("success");
+    const ml = result.marketplaces.find((m) => m.slug === "mercado-livre");
+    const shopee = result.marketplaces.find((m) => m.slug === "shopee");
+    expect(ml).toBeDefined();
+    expect(shopee).toBeDefined();
+    expect(ml!.orders).toBe(1);
+    expect(ml!.revenue).toBe(100);
+    expect(shopee!.orders).toBe(1);
+    expect(shopee!.revenue).toBe(50);
   });
 
   it("keeps Products on real product reads", async () => {
@@ -227,6 +256,7 @@ describe("real backend data services", () => {
       created_at: "2026-08-01T00:00:00Z",
       updated_at: "2026-08-01T00:00:00Z",
       last_synced_at: null,
+      channel_id: null,
       items: [],
     }));
 

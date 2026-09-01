@@ -60,6 +60,7 @@ export interface Order {
   created_at: string;
   updated_at: string;
   last_synced_at: string | null;
+  channel_id: string | null;
   items: OrderItem[];
 }
 

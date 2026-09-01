@@ -5,19 +5,9 @@ import type { Order, SalesChannel } from "@/types/api";
 import type { MarketplaceData, MarketplaceSummaryData, MarketplaceDataResult } from "@/features/marketplace/types";
 import { groupChannelsByMarketplace, resolveMarketplaceGroup } from "@/features/marketplace/utils/grouping";
 
-function channelOrders(channel: SalesChannel, orders: Order[]): Order[] {
-  const channelName = (channel.name ?? "").toLowerCase();
-  const channelTipo = (channel.tipo ?? "").toLowerCase();
-  const channelId = (channel.bling_id ?? "").toLowerCase();
-
-  return orders.filter((order) => {
-    const mp = (order.marketplace ?? "").toLowerCase();
-    if (mp === "bling") return false;
-    if (channelId && mp === channelId) return true;
-    if (channelTipo && mp.includes(channelTipo)) return true;
-    if (channelName && mp.includes(channelName)) return true;
-    return false;
-  });
+function ordersForChannels(channels: SalesChannel[], orders: Order[]): Order[] {
+  const channelIds = new Set(channels.map((ch) => ch.id));
+  return orders.filter((order) => order.channel_id && channelIds.has(order.channel_id));
 }
 
 function mapGroupToMarketplace(
@@ -26,7 +16,7 @@ function mapGroupToMarketplace(
   channels: SalesChannel[],
   orders: Order[],
 ): MarketplaceData {
-  const allOrders = channels.flatMap((ch) => channelOrders(ch, orders));
+  const allOrders = ordersForChannels(channels, orders);
   const revenue = allOrders.reduce((sum, order) => sum + toNumber(order.total_amount), 0);
   const total = allOrders.length;
   const hasAttribution = total > 0;
@@ -59,16 +49,18 @@ function mapGroupToMarketplace(
   };
 }
 
-function buildSummary(orders: Order[]): MarketplaceSummaryData {
+function buildSummary(orders: Order[], marketplaces: MarketplaceData[]): MarketplaceSummaryData {
   const totalRevenue = orders.reduce((s, o) => s + toNumber(o.total_amount), 0);
   const totalOrders = orders.length;
+  const withOrders = marketplaces.filter((m) => m.orders > 0);
+  const leader = [...withOrders].sort((a, b) => b.revenue - a.revenue)[0];
 
   return {
     totalRevenue: formatCurrency(totalRevenue),
     totalOrders,
     formattedTotalOrders: String(totalOrders),
     averageTicket: totalOrders > 0 ? formatCurrency(totalRevenue / totalOrders) : "—",
-    leaderName: "-",
+    leaderName: leader?.name ?? "-",
     highestGrowth: 0,
     highestGrowthName: "-",
     averageHealth: 0,
@@ -107,7 +99,7 @@ export async function fetchMarketplaceData(): Promise<MarketplaceDataResult> {
 
     return {
       marketplaces,
-      summary: buildSummary(orders),
+      summary: buildSummary(orders, marketplaces),
       status: "success",
       error: null,
     };

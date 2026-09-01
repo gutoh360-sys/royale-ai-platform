@@ -659,6 +659,14 @@ class BlingSyncService:
             order.total_amount = float(total)
         order.last_synced_at = self._now()
 
+        loja = raw.get("loja") or {}
+        if isinstance(loja, dict):
+            loja_id = str(loja.get("id") or "").strip()
+            if loja_id:
+                channel = await self._data_repo.find_channel_by_bling_id(loja_id)
+                if channel is not None:
+                    order.channel_id = channel.id
+
         items = raw.get("itens") or []
         if isinstance(items, list):
             for item in items:
