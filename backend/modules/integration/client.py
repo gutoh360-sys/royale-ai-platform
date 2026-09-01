@@ -333,6 +333,27 @@ class BlingApiClient:
         data = body.get("data")
         return cast(dict[str, Any], data) if isinstance(data, dict) else None
 
+    async def fetch_order(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        order_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a single Bling sales order by ID.
+
+        Returns the order dict on 200, None on 404, raises ApiError otherwise.
+        """
+        response = await self.get_authenticated(
+            f"/pedidos/vendas/{order_id}", token_provider
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise ApiError(f"order fetch failed with status {response.status_code}")
+        body = response.json()
+        data = body.get("data")
+        return cast(dict[str, Any], data) if isinstance(data, dict) else None
+
     @staticmethod
     def _parse_token_response(payload: dict[str, Any]) -> TokenResponse:
         return TokenResponse(

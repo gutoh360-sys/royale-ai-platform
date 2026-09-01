@@ -72,6 +72,18 @@ class SyncResult:
     error_message: str | None = None
 
 
+@dataclass(frozen=True)
+class BackfillResult:
+    selected: int
+    processed: int
+    updated: int
+    with_channel: int
+    without_store: int
+    unmatched_channel: int
+    not_found: int
+    failed: int
+
+
 class IncompleteSyncItemError(Exception):
     """Raised when a synced item is missing required fields."""
 
@@ -228,6 +240,74 @@ class BlingSyncService:
                 data_final=data_final.isoformat(),
             ),
             upsert=self._upsert_order,
+        )
+
+    async def backfill_orders(self, external_ids: list[str]) -> BackfillResult:
+        """Re-fetch specific orders from Bling by external_id and upsert.
+
+        This is an administrative operation for orders that were missed by
+        the incremental sync window. It does NOT create a SyncLog entry.
+        """
+        selected = len(external_ids)
+        processed = updated = with_channel = without_store = 0
+        unmatched_channel = not_found = failed = 0
+
+        for eid in external_ids:
+            try:
+                raw = await self._client.fetch_order(
+                    self._token_provider, order_id=eid
+                )
+            except Exception as exc:
+                failed += 1
+                self._log_failure_safely(
+                    "bling_backfill_order_fetch_failed",
+                    entity="orders",
+                    cause=exc,
+                )
+                continue
+
+            if raw is None:
+                not_found += 1
+                continue
+
+            try:
+                async with self._data_repo.session.begin_nested():
+                    outcome = await self._upsert_order(raw)
+            except Exception as exc:
+                failed += 1
+                self._log_failure_safely(
+                    "bling_backfill_order_upsert_failed",
+                    entity="orders",
+                    cause=exc,
+                )
+                continue
+            finally:
+                await self._record_deferred_item_errors()
+
+            processed += 1
+            if outcome == "updated":
+                updated += 1
+
+            loja = raw.get("loja") or {}
+            loja_id = str((loja.get("id") or "")).strip() if isinstance(loja, dict) else ""
+            if loja_id:
+                ch = await self._data_repo.find_channel_by_bling_id(loja_id)
+                if ch is not None:
+                    with_channel += 1
+                else:
+                    unmatched_channel += 1
+            else:
+                without_store += 1
+
+        return BackfillResult(
+            selected=selected,
+            processed=processed,
+            updated=updated,
+            with_channel=with_channel,
+            without_store=without_store,
+            unmatched_channel=unmatched_channel,
+            not_found=not_found,
+            failed=failed,
         )
 
     async def _run_sync(

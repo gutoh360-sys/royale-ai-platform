@@ -13,6 +13,8 @@ from backend.modules.integration.errors import (
 )
 from backend.modules.integration.schemas import (
     AuthorizationUrlResponse,
+    BackfillOrdersRequest,
+    BackfillOrdersResponse,
     CallbackResponse,
     ConnectionStatusResponse,
     ConnectionTestResponse,
@@ -145,4 +147,39 @@ async def trigger_sync(
         items_failed=result.items_failed,
         items_skipped=result.items_skipped,
         error_message=result.error_message,
+    )
+
+
+@router.post(
+    "/backfill-orders",
+    response_model=BackfillOrdersResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def backfill_orders(
+    body: BackfillOrdersRequest,
+    service: BlingSyncService = Depends(get_bling_sync_service),
+) -> BackfillOrdersResponse:
+    if not body.external_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="external_ids must not be empty",
+        )
+    if len(body.external_ids) > 500:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="external_ids must not exceed 500 items",
+        )
+    try:
+        result = await service.backfill_orders(body.external_ids)
+    except OAuthPermanentError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return BackfillOrdersResponse(
+        selected=result.selected,
+        processed=result.processed,
+        updated=result.updated,
+        with_channel=result.with_channel,
+        without_store=result.without_store,
+        unmatched_channel=result.unmatched_channel,
+        not_found=result.not_found,
+        failed=result.failed,
     )

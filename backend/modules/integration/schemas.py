@@ -35,3 +35,18 @@ class SyncTriggerResponse(BaseModel):
     items_failed: int
     items_skipped: int = 0
     error_message: str | None = None
+
+
+class BackfillOrdersRequest(BaseModel):
+    external_ids: list[str]
+
+
+class BackfillOrdersResponse(BaseModel):
+    selected: int
+    processed: int
+    updated: int
+    with_channel: int
+    without_store: int
+    unmatched_channel: int
+    not_found: int
+    failed: int
