@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 import { MarketplaceMetric } from "./marketplace-metric";
 import { getHealthConfig } from "@/features/marketplace/utils/health";
 import type { MarketplaceData } from "@/features/marketplace/types";
@@ -14,7 +13,7 @@ export function MarketplaceCard({ marketplace }: MarketplaceCardProps) {
 
   return (
     <Link
-      href={`/marketplace/${marketplace.id}`}
+      href={`/marketplace/${marketplace.slug}`}
       className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl group"
       aria-label={`Ver detalhes do ${marketplace.name}`}
     >
@@ -28,18 +27,13 @@ export function MarketplaceCard({ marketplace }: MarketplaceCardProps) {
             <div>
               <h3 className="font-heading text-sm font-semibold">{marketplace.name}</h3>
               <p className="text-[11px] text-muted-foreground">
-                {marketplace.status === "connected" ? "Conectado" : marketplace.status}
+                {marketplace.channelCount > 1
+                  ? `${marketplace.channelCount} conexões`
+                  : marketplace.status === "connected"
+                    ? "Conectado"
+                    : marketplace.status}
               </p>
             </div>
-          </div>
-          <div
-            className={cn(
-              "flex items-center gap-1.5 text-xs font-medium",
-              marketplace.growth >= 0 ? "text-success" : "text-destructive",
-            )}
-          >
-            <span>{marketplace.growth >= 0 ? "↑" : "↓"}</span>
-            <span>{Math.abs(marketplace.growth)}%</span>
           </div>
         </div>
 
@@ -51,24 +45,16 @@ export function MarketplaceCard({ marketplace }: MarketplaceCardProps) {
         </div>
 
         <div className="mt-4 pt-4 border-t">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] text-muted-foreground">Saúde operacional</span>
-            <span className={cn("text-xs font-medium", health.color)}>{health.label}</span>
-          </div>
-          <div className="h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={marketplace.health} aria-valuemin={0} aria-valuemax={100} aria-label={`Saúde: ${marketplace.health}%`}>
-            <div
-              className={cn("h-full rounded-full transition-all", health.barColor)}
-              style={{ width: `${marketplace.health}%` }}
-            />
-          </div>
-          <div className="flex items-center justify-between mt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-muted-foreground">
+              {marketplace.health === 100 ? "Conectado" : marketplace.health === 0 ? "Pausado" : health.label}
+            </span>
             <span className="text-[11px] text-muted-foreground">
               {new Date(marketplace.lastUpdate).toLocaleTimeString("pt-BR", {
                 hour: "2-digit",
                 minute: "2-digit",
               })}
             </span>
-            <span className="text-xs font-medium">{marketplace.health}/100</span>
           </div>
         </div>
       </CardContent>

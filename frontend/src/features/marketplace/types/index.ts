@@ -1,8 +1,11 @@
+import type { SalesChannel } from "@/types/api";
+
 export type MarketplaceHealth = "excellent" | "good" | "attention" | "critical";
 export type MarketplaceStatus = "connected" | "error" | "paused";
 
 export interface MarketplaceData {
   id: string;
+  slug: string;
   name: string;
   logo: string;
   status: MarketplaceStatus;
@@ -17,6 +20,8 @@ export interface MarketplaceData {
   formattedMarketShare: string;
   health: number;
   lastUpdate: string;
+  channels: SalesChannel[];
+  channelCount: number;
 }
 
 export interface MarketplaceSummaryData {

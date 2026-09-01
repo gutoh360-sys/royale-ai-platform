@@ -1,8 +1,22 @@
 import type { MarketplaceData, MarketplaceSummaryData } from "@/features/marketplace/types";
 
+const mkChannel = (id: string, name: string, overrides?: Record<string, unknown>) => ({
+  id,
+  bling_id: id,
+  name,
+  tipo: null,
+  agrupador: null,
+  situacao: 1,
+  created_at: "2025-01-01T00:00:00Z",
+  updated_at: "2025-01-01T00:00:00Z",
+  last_synced_at: null,
+  ...overrides,
+});
+
 export const mockMarketplaces: MarketplaceData[] = [
   {
     id: "ml",
+    slug: "mercado-livre",
     name: "Mercado Livre",
     logo: "ML",
     status: "connected",
@@ -17,9 +31,12 @@ export const mockMarketplaces: MarketplaceData[] = [
     formattedMarketShare: "42,8%",
     health: 96,
     lastUpdate: "2026-07-27T09:30:00",
+    channels: [mkChannel("ml-1", "Mercado Livre")],
+    channelCount: 1,
   },
   {
     id: "shopee",
+    slug: "shopee",
     name: "Shopee",
     logo: "SP",
     status: "connected",
@@ -34,9 +51,12 @@ export const mockMarketplaces: MarketplaceData[] = [
     formattedMarketShare: "26,3%",
     health: 82,
     lastUpdate: "2026-07-27T09:25:00",
+    channels: [mkChannel("shopee-1", "Shopee")],
+    channelCount: 1,
   },
   {
     id: "amazon",
+    slug: "amazon",
     name: "Amazon",
     logo: "AM",
     status: "connected",
@@ -51,9 +71,12 @@ export const mockMarketplaces: MarketplaceData[] = [
     formattedMarketShare: "18,7%",
     health: 65,
     lastUpdate: "2026-07-27T09:20:00",
+    channels: [mkChannel("amz-1", "Amazon")],
+    channelCount: 1,
   },
   {
     id: "magalu",
+    slug: "magazine-luiza",
     name: "Magalu",
     logo: "MG",
     status: "connected",
@@ -68,9 +91,12 @@ export const mockMarketplaces: MarketplaceData[] = [
     formattedMarketShare: "8,7%",
     health: 48,
     lastUpdate: "2026-07-27T09:15:00",
+    channels: [mkChannel("mag-1", "Magalu")],
+    channelCount: 1,
   },
   {
     id: "tiktok",
+    slug: "tiktok-shop",
     name: "TikTok Shop",
     logo: "TT",
     status: "connected",
@@ -85,6 +111,8 @@ export const mockMarketplaces: MarketplaceData[] = [
     formattedMarketShare: "3,5%",
     health: 55,
     lastUpdate: "2026-07-27T09:10:00",
+    channels: [mkChannel("tt-1", "TikTok Shop")],
+    channelCount: 1,
   },
 ];
 

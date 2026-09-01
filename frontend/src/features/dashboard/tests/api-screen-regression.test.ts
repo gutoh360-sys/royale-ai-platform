@@ -15,8 +15,7 @@ describe("priority screens API regression", () => {
 
     expect(service).toContain('api.get<SalesChannel[]>("/sales-channels")');
     expect(service).toContain('api.get<Order[]>("/orders")');
-    expect(service).toContain("groupOrdersByMarketplace");
-    expect(service).toContain("mapChannelsToMarketplaces");
+    expect(service).toContain("groupChannelsByMarketplace");
     expect(service).not.toMatch(/mock/i);
     expect(page).toContain('status === "error"');
     expect(page).toContain("Erro ao carregar marketplaces");
