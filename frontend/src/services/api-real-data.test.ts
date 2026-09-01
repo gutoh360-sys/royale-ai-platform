@@ -206,4 +206,65 @@ describe("real backend data services", () => {
     expect(result.data.status.summary).toContain("2 pedidos");
     expect(result.data.recommendations.map((r) => r.id)).toContain("restock");
   });
+
+  it("uses raw orders for consolidated summary, not grouped marketplace metrics", async () => {
+    const bulkOrders: Order[] = Array.from({ length: 870 }, (_, i) => ({
+      id: `order-${i}`,
+      external_id: `ext-${i}`,
+      marketplace: "bling",
+      order_number: String(i + 1),
+      customer_name: `Cliente ${i}`,
+      customer_document: null,
+      customer_email: null,
+      customer_phone: null,
+      status: "pending" as const,
+      total_amount: "99.01",
+      shipping_amount: null,
+      discount_amount: null,
+      payment_method: null,
+      notes: null,
+      ordered_at: "2026-08-01T00:00:00Z",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
+      last_synced_at: null,
+      items: [],
+    }));
+
+    const channelsWithNoOrders: SalesChannel[] = [
+      {
+        id: "ch-1",
+        bling_id: "10",
+        name: "Amazon",
+        tipo: "AMAZON",
+        agrupador: null,
+        situacao: 1,
+        created_at: "2026-08-01T00:00:00Z",
+        updated_at: "2026-08-01T00:00:00Z",
+        last_synced_at: null,
+      },
+    ];
+
+    const fetchMock = vi.fn((url: string) => {
+      if (url.startsWith("/api/backend/orders")) return Promise.resolve(jsonResponse(bulkOrders));
+      if (url.startsWith("/api/backend/products")) return Promise.resolve(jsonResponse(products));
+      if (url.startsWith("/api/backend/sales-channels")) return Promise.resolve(jsonResponse(channelsWithNoOrders));
+      if (url.startsWith("/api/backend/analytics/dashboard")) return Promise.resolve(jsonResponse(analytics));
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchMarketplaceData();
+
+    expect(result.status).toBe("success");
+    expect(result.marketplaces).toHaveLength(1);
+    expect(result.marketplaces[0].name).toBe("Amazon");
+
+    expect(result.marketplaces[0].orders).toBe(0);
+    expect(result.marketplaces[0].formattedRevenue).toBe("—");
+
+    expect(result.summary.totalOrders).toBe(870);
+    expect(result.summary.totalRevenue).not.toContain("0,00");
+    expect(result.summary.averageTicket).not.toBe("—");
+    expect(result.summary.averageTicket).not.toContain("NaN");
+  });
 });

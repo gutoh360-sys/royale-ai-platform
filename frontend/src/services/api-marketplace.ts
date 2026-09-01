@@ -59,24 +59,19 @@ function mapGroupToMarketplace(
   };
 }
 
-function buildSummary(marketplaces: MarketplaceData[]): MarketplaceSummaryData {
-  const totalRevenue = marketplaces.reduce((s, m) => s + m.revenue, 0);
-  const totalOrders = marketplaces.reduce((s, m) => s + m.orders, 0);
-  const withOrders = marketplaces.filter((m) => m.orders > 0);
-  const leader = [...withOrders].sort((a, b) => b.revenue - a.revenue)[0];
+function buildSummary(orders: Order[]): MarketplaceSummaryData {
+  const totalRevenue = orders.reduce((s, o) => s + toNumber(o.total_amount), 0);
+  const totalOrders = orders.length;
 
   return {
     totalRevenue: formatCurrency(totalRevenue),
     totalOrders,
     formattedTotalOrders: String(totalOrders),
     averageTicket: totalOrders > 0 ? formatCurrency(totalRevenue / totalOrders) : "—",
-    leaderName: leader?.name ?? "-",
+    leaderName: "-",
     highestGrowth: 0,
     highestGrowthName: "-",
-    averageHealth:
-      marketplaces.length > 0
-        ? Math.round(marketplaces.reduce((s, m) => s + m.health, 0) / marketplaces.length)
-        : 0,
+    averageHealth: 0,
   };
 }
 
@@ -112,7 +107,7 @@ export async function fetchMarketplaceData(): Promise<MarketplaceDataResult> {
 
     return {
       marketplaces,
-      summary: buildSummary(marketplaces),
+      summary: buildSummary(orders),
       status: "success",
       error: null,
     };
