@@ -175,11 +175,14 @@ async def backfill_orders(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return BackfillOrdersResponse(
         selected=result.selected,
+        eligible=result.eligible,
         processed=result.processed,
         updated=result.updated,
         with_channel=result.with_channel,
         without_store=result.without_store,
         unmatched_channel=result.unmatched_channel,
-        not_found=result.not_found,
+        missing_local=result.missing_local,
+        already_linked=result.already_linked,
+        bling_not_found=result.bling_not_found,
         failed=result.failed,
     )

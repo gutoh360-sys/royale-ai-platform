@@ -43,10 +43,13 @@ class BackfillOrdersRequest(BaseModel):
 
 class BackfillOrdersResponse(BaseModel):
     selected: int
+    eligible: int
     processed: int
     updated: int
     with_channel: int
     without_store: int
     unmatched_channel: int
-    not_found: int
+    missing_local: int
+    already_linked: int
+    bling_not_found: int
     failed: int

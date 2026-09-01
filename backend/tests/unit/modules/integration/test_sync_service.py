@@ -2096,11 +2096,11 @@ def _backfill_client(
     return BlingApiClient(settings, client=http)
 
 
-async def test_backfill_old_order_with_loja_match(
+async def test_backfill_existing_null_loja_match(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """A: Old order + loja with matching SalesChannel -> channel_id filled."""
+    """A: existing + NULL + loja with match -> updated, channel_id filled."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2142,10 +2142,13 @@ async def test_backfill_old_order_with_loja_match(
     await db_session.commit()
 
     assert result.selected == 1
+    assert result.eligible == 1
     assert result.processed == 1
     assert result.updated == 1
     assert result.with_channel == 1
-    assert result.not_found == 0
+    assert result.missing_local == 0
+    assert result.already_linked == 0
+    assert result.bling_not_found == 0
     assert result.failed == 0
 
     order = await db_session.scalar(select(Order).where(Order.external_id == "9001"))
@@ -2159,7 +2162,7 @@ async def test_backfill_corrects_ordered_at(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """B: Old order + real Bling date -> ordered_at corrected."""
+    """B: existing + NULL + real Bling date -> ordered_at corrected."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2194,6 +2197,7 @@ async def test_backfill_corrects_ordered_at(
     result = await service.backfill_orders(["9002"])
     await db_session.commit()
 
+    assert result.eligible == 1
     assert result.processed == 1
     assert result.without_store == 1
     order = await db_session.scalar(select(Order).where(Order.external_id == "9002"))
@@ -2206,7 +2210,7 @@ async def test_backfill_loja_absent_channel_stays_null(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """C: Loja absent -> channel_id stays NULL."""
+    """C: existing + NULL + loja absent -> channel_id stays NULL."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2251,7 +2255,7 @@ async def test_backfill_loja_unmatched(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """D: Loja.id exists but no SalesChannel match -> NULL + unmatched."""
+    """D: existing + NULL + loja.id without SalesChannel -> unmatched."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2293,11 +2297,101 @@ async def test_backfill_loja_unmatched(
     assert order.channel_id is None
 
 
-async def test_backfill_not_found_continues(
+async def test_backfill_missing_local_not_created(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """E: 404 -> NOT_FOUND, continues batch."""
+    """E: external_id not in local DB -> missing_local, NOT created."""
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    order_responses = {
+        "9999": {
+            "id": 9999,
+            "numero": "9999",
+            "data": "2026-08-01T10:00:00-03:00",
+            "contato": {"nome": "Phantom"},
+            "total": {"valor": 50.0},
+            "itens": [],
+        },
+    }
+    client = _backfill_client(settings, order_responses)
+    service = await _make_service(db_session, client, settings)
+    result = await service.backfill_orders(["9999"])
+    await db_session.commit()
+
+    assert result.missing_local == 1
+    assert result.processed == 0
+    order = await db_session.scalar(select(Order).where(Order.external_id == "9999"))
+    assert order is None
+
+
+async def test_backfill_already_linked_preserved(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """F: existing + channel_id already set -> already_linked, nothing changed."""
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from backend.database.models.order import Order
+    from backend.database.models.sales_channel import SalesChannel
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    channel = SalesChannel(bling_id="10", name="Shopee", tipo="SHOPEE", agrupador=3, situacao=1)
+    db_session.add(channel)
+    await db_session.flush()
+
+    original_date = datetime(2026, 8, 31, 17, 20, 0, tzinfo=timezone.utc)
+    order = Order(
+        id=uuid4(),
+        external_id="9005",
+        marketplace="bling",
+        order_number="5005",
+        customer_name="Linked",
+        ordered_at=original_date,
+        channel_id=channel.id,
+    )
+    db_session.add(order)
+    await db_session.flush()
+
+    order_responses = {
+        "9005": {
+            "id": 9005,
+            "numero": "5005",
+            "data": "2026-07-15T10:00:00-03:00",
+            "contato": {"nome": "Linked"},
+            "total": {"valor": 200.0},
+            "loja": {"id": 99, "descricao": "Outro Canal"},
+            "itens": [],
+        },
+    }
+    client = _backfill_client(settings, order_responses)
+    service = await _make_service(db_session, client, settings)
+    result = await service.backfill_orders(["9005"])
+    await db_session.commit()
+
+    assert result.already_linked == 1
+    assert result.processed == 0
+    assert result.eligible == 0
+
+    order = await db_session.scalar(select(Order).where(Order.external_id == "9005"))
+    assert order.channel_id == channel.id
+    assert order.ordered_at == original_date
+
+
+async def test_backfill_bling_not_found_continues(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """G: Bling 404 -> bling_not_found, continues batch."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2308,30 +2402,30 @@ async def test_backfill_not_found_continues(
 
     order = Order(
         id=uuid4(),
-        external_id="9005",
+        external_id="9006",
         marketplace="bling",
-        order_number="5005",
+        order_number="5006",
         customer_name="Ghost",
         ordered_at=datetime(2026, 8, 31, 17, 20, 0, tzinfo=timezone.utc),
     )
     db_session.add(order)
     await db_session.flush()
 
-    order_responses = {"9005": None}
+    order_responses = {"9006": None}
     client = _backfill_client(settings, order_responses)
     service = await _make_service(db_session, client, settings)
-    result = await service.backfill_orders(["9005"])
+    result = await service.backfill_orders(["9006"])
     await db_session.commit()
 
-    assert result.not_found == 1
+    assert result.bling_not_found == 1
     assert result.processed == 0
 
 
-async def test_backfill_error_in_one_order_others_continue(
+async def test_backfill_error_isolated(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """F: Error in 1 order -> others continue."""
+    """H: error in 1 order -> failed, others continue."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2341,7 +2435,7 @@ async def test_backfill_error_in_one_order_others_continue(
     await service.sync_products()
     await db_session.commit()
 
-    for eid in ["9006", "9007"]:
+    for eid in ["9007", "9008"]:
         order = Order(
             id=uuid4(),
             external_id=eid,
@@ -2353,20 +2447,24 @@ async def test_backfill_error_in_one_order_others_continue(
         db_session.add(order)
     await db_session.flush()
 
+    channel = SalesChannel(bling_id="10", name="Shopee", tipo="SHOPEE", agrupador=3, situacao=1)
+    db_session.add(channel)
+    await db_session.flush()
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         prefix = "/Api/v3/pedidos/vendas/"
         if path.startswith(prefix):
             eid = path[len(prefix):]
-            if eid == "9006":
-                return httpx.Response(500, json={"error": {"message": "server error"}})
             if eid == "9007":
+                return httpx.Response(500, json={"error": {"message": "server error"}})
+            if eid == "9008":
                 return httpx.Response(200, json={
                     "data": {
-                        "id": 9007,
-                        "numero": "5007",
+                        "id": 9008,
+                        "numero": "5008",
                         "data": "2026-08-05T10:00:00-03:00",
-                        "contato": {"nome": "Client9007"},
+                        "contato": {"nome": "Client9008"},
                         "total": {"valor": 200.0},
                         "loja": {"id": 10, "descricao": "Shopee"},
                         "itens": [],
@@ -2374,15 +2472,11 @@ async def test_backfill_error_in_one_order_others_continue(
                 })
         return httpx.Response(404, json={"error": {"message": "not found"}})
 
-    channel = SalesChannel(bling_id="10", name="Shopee", tipo="SHOPEE", agrupador=3, situacao=1)
-    db_session.add(channel)
-    await db_session.flush()
-
     transport = httpx.MockTransport(handler)
     http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(1.0))
     client = BlingApiClient(settings, client=http)
     service = await _make_service(db_session, client, settings)
-    result = await service.backfill_orders(["9006", "9007"])
+    result = await service.backfill_orders(["9007", "9008"])
     await db_session.commit()
 
     assert result.failed == 1
@@ -2390,46 +2484,11 @@ async def test_backfill_error_in_one_order_others_continue(
     assert result.with_channel == 1
 
 
-async def test_backfill_already_linked_not_selected(
+async def test_backfill_idempotent_on_repeat(
     db_session: AsyncSession,
     settings: Settings,
 ) -> None:
-    """G: Order already linked -> not selected by caller (out of scope)."""
-    from uuid import uuid4
-    from datetime import datetime, timezone
-    from backend.database.models.order import Order
-    from backend.database.models.sales_channel import SalesChannel
-
-    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
-    await service.sync_products()
-    await db_session.commit()
-
-    channel = SalesChannel(bling_id="10", name="Shopee", tipo="SHOPEE", agrupador=3, situacao=1)
-    db_session.add(channel)
-    await db_session.flush()
-
-    order = Order(
-        id=uuid4(),
-        external_id="9008",
-        marketplace="bling",
-        order_number="5008",
-        customer_name="Linked",
-        ordered_at=datetime(2026, 8, 31, 17, 20, 0, tzinfo=timezone.utc),
-        channel_id=channel.id,
-    )
-    db_session.add(order)
-    await db_session.flush()
-
-    result = await service.backfill_orders([])
-    assert result.selected == 0
-    assert result.processed == 0
-
-
-async def test_backfill_repeated_execution_idempotent(
-    db_session: AsyncSession,
-    settings: Settings,
-) -> None:
-    """H: Repeated execution -> idempotent."""
+    """I: repeated execution -> second run skips already_linked."""
     from uuid import uuid4
     from datetime import datetime, timezone
     from backend.database.models.order import Order
@@ -2465,11 +2524,109 @@ async def test_backfill_repeated_execution_idempotent(
     r1 = await service.backfill_orders(["9009"])
     assert r1.processed == 1
     assert r1.updated == 1
+    assert r1.eligible == 1
 
     r2 = await service.backfill_orders(["9009"])
-    assert r2.processed == 1
-    assert r2.updated == 1
+    assert r2.already_linked == 1
+    assert r2.processed == 0
+    assert r2.eligible == 0
 
     order = await db_session.scalar(select(Order).where(Order.external_id == "9009"))
     expected_date = datetime(2026, 8, 12, 15, 0, 0, tzinfo=timezone.utc)
     assert order.ordered_at == expected_date
+
+
+async def test_sync_orders_still_creates_new(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """J: sync_orders() still creates new orders (default behavior unchanged)."""
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    payload = {
+        "data": [
+            {
+                "id": 9010,
+                "numero": "5010",
+                "data": "2026-08-01T10:00:00-03:00",
+                "contato": {"nome": "NewViaSync"},
+                "total": {"valor": 120.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 120.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "9010"))
+    assert order is not None
+
+
+async def test_backfill_persistence_across_sessions(
+    pg_engine,
+    session_factory,
+    settings: Settings,
+) -> None:
+    """Persistence: backfill writes visible in a NEW session after commit."""
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from backend.database.models.order import Order
+    from backend.database.models.sales_channel import SalesChannel
+    from backend.database.base import Base
+    from sqlalchemy import text
+
+    async with pg_engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS operational"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as setup_session:
+        channel = SalesChannel(bling_id="10", name="Shopee", tipo="SHOPEE", agrupador=3, situacao=1)
+        setup_session.add(channel)
+        await setup_session.flush()
+
+        order = Order(
+            id=uuid4(),
+            external_id="9011",
+            marketplace="bling",
+            order_number="5011",
+            customer_name="Persist",
+            ordered_at=datetime(2026, 8, 31, 17, 20, 0, tzinfo=timezone.utc),
+        )
+        setup_session.add(order)
+        await setup_session.commit()
+
+    async with session_factory() as exec_session:
+        service = await _make_service(
+            exec_session,
+            _backfill_client(settings, {
+                "9011": {
+                    "id": 9011,
+                    "numero": "5011",
+                    "data": "2026-06-01T08:00:00-03:00",
+                    "contato": {"nome": "Persist"},
+                    "total": {"valor": 300.0},
+                    "loja": {"id": 10, "descricao": "Shopee"},
+                    "itens": [],
+                }
+            }),
+            settings,
+        )
+        result = await service.backfill_orders(["9011"])
+        await exec_session.commit()
+
+    async with session_factory() as verify_session:
+        order = await verify_session.scalar(
+            select(Order).where(Order.external_id == "9011")
+        )
+        assert order is not None
+        expected_date = datetime(2026, 6, 1, 11, 0, 0, tzinfo=timezone.utc)
+        assert order.ordered_at == expected_date
+        assert order.channel_id is not None

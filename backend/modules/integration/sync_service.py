@@ -75,12 +75,15 @@ class SyncResult:
 @dataclass(frozen=True)
 class BackfillResult:
     selected: int
+    eligible: int
     processed: int
     updated: int
     with_channel: int
     without_store: int
     unmatched_channel: int
-    not_found: int
+    missing_local: int
+    already_linked: int
+    bling_not_found: int
     failed: int
 
 
@@ -98,6 +101,10 @@ class DuplicateSkuError(ValueError):
 
 class OrderItemUnknownProductError(ValueError):
     """Raised when an order item references a product not present in the catalog."""
+
+
+class OrderNotFoundError(ValueError):
+    """Raised during backfill when external_id has no local Order."""
 
 
 class BlingSyncService:
@@ -246,13 +253,29 @@ class BlingSyncService:
         """Re-fetch specific orders from Bling by external_id and upsert.
 
         This is an administrative operation for orders that were missed by
-        the incremental sync window. It does NOT create a SyncLog entry.
+        the incremental sync window. It only enriches EXISTING local orders
+        that still have channel_id IS NULL. It never creates new orders and
+        never overwrites an already-linked channel_id.
         """
+        from backend.database.models.order import Order as OrderModel
+
         selected = len(external_ids)
-        processed = updated = with_channel = without_store = 0
-        unmatched_channel = not_found = failed = 0
+        eligible = processed = updated = with_channel = 0
+        without_store = unmatched_channel = missing_local = 0
+        already_linked = bling_not_found = failed = 0
 
         for eid in external_ids:
+            existing = await self._data_repo.find_order_by_external_id(eid)
+            if existing is None:
+                missing_local += 1
+                continue
+
+            if existing.channel_id is not None:
+                already_linked += 1
+                continue
+
+            eligible += 1
+
             try:
                 raw = await self._client.fetch_order(
                     self._token_provider, order_id=eid
@@ -267,12 +290,19 @@ class BlingSyncService:
                 continue
 
             if raw is None:
-                not_found += 1
+                bling_not_found += 1
                 continue
 
             try:
                 async with self._data_repo.session.begin_nested():
-                    outcome = await self._upsert_order(raw)
+                    outcome = await self._upsert_order(
+                        raw,
+                        create_if_missing=False,
+                        preserve_existing_channel=True,
+                    )
+            except OrderNotFoundError:
+                missing_local += 1
+                continue
             except Exception as exc:
                 failed += 1
                 self._log_failure_safely(
@@ -301,12 +331,15 @@ class BlingSyncService:
 
         return BackfillResult(
             selected=selected,
+            eligible=eligible,
             processed=processed,
             updated=updated,
             with_channel=with_channel,
             without_store=without_store,
             unmatched_channel=unmatched_channel,
-            not_found=not_found,
+            missing_local=missing_local,
+            already_linked=already_linked,
+            bling_not_found=bling_not_found,
             failed=failed,
         )
 
@@ -710,7 +743,13 @@ class BlingSyncService:
         except (TypeError, ValueError):
             return None
 
-    async def _upsert_order(self, raw: dict[str, Any]) -> str:
+    async def _upsert_order(
+        self,
+        raw: dict[str, Any],
+        *,
+        create_if_missing: bool = True,
+        preserve_existing_channel: bool = False,
+    ) -> str:
         from uuid import uuid4
 
         external_id = str(raw.get("id"))
@@ -722,6 +761,10 @@ class BlingSyncService:
         bling_date = self._parse_bling_datetime(raw.get("data"))
         order = await self._data_repo.find_order_by_external_id(external_id)
         if order is None:
+            if not create_if_missing:
+                raise OrderNotFoundError(
+                    f"order with external_id={external_id} does not exist locally"
+                )
             order = Order(
                 id=uuid4(),
                 external_id=external_id,
@@ -754,13 +797,14 @@ class BlingSyncService:
             order.total_amount = float(total)
         order.last_synced_at = self._now()
 
-        loja = raw.get("loja") or {}
-        if isinstance(loja, dict):
-            loja_id = str(loja.get("id") or "").strip()
-            if loja_id:
-                channel = await self._data_repo.find_channel_by_bling_id(loja_id)
-                if channel is not None:
-                    order.channel_id = channel.id
+        if not (preserve_existing_channel and order.channel_id is not None):
+            loja = raw.get("loja") or {}
+            if isinstance(loja, dict):
+                loja_id = str(loja.get("id") or "").strip()
+                if loja_id:
+                    channel = await self._data_repo.find_channel_by_bling_id(loja_id)
+                    if channel is not None:
+                        order.channel_id = channel.id
 
         items = raw.get("itens") or []
         if isinstance(items, list):
