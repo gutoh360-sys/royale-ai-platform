@@ -87,6 +87,21 @@ class BackfillResult:
     failed: int
 
 
+@dataclass(frozen=True)
+class BackfillOrderItemsResult:
+    selected: int
+    processed: int
+    orders_enriched: int
+    items_created: int
+    unknown_products: int
+    detail_without_items: int
+    not_found: int
+    failed: int
+    remaining_without_items: int
+    next_cursor: str | None
+    has_more: bool
+
+
 class IncompleteSyncItemError(Exception):
     """Raised when a synced item is missing required fields."""
 
@@ -257,8 +272,6 @@ class BlingSyncService:
         that still have channel_id IS NULL. It never creates new orders and
         never overwrites an already-linked channel_id.
         """
-        from backend.database.models.order import Order as OrderModel
-
         selected = len(external_ids)
         eligible = processed = updated = with_channel = 0
         without_store = unmatched_channel = missing_local = 0
@@ -319,7 +332,7 @@ class BlingSyncService:
                 updated += 1
 
             loja = raw.get("loja") or {}
-            loja_id = str((loja.get("id") or "")).strip() if isinstance(loja, dict) else ""
+            loja_id = str(loja.get("id") or "").strip() if isinstance(loja, dict) else ""
             if loja_id:
                 ch = await self._data_repo.find_channel_by_bling_id(loja_id)
                 if ch is not None:
@@ -341,6 +354,94 @@ class BlingSyncService:
             already_linked=already_linked,
             bling_not_found=bling_not_found,
             failed=failed,
+        )
+
+    async def backfill_order_items(
+        self, limit: int = 50, after_external_id: str | None = None
+    ) -> BackfillOrderItemsResult:
+        """Enrich existing orders with items from Bling detail endpoint.
+
+        Only processes orders that have NO OrderItems. Uses cursor-based
+        pagination for deterministic batching. Each order is isolated
+        via SAVEPOINT so failures don't abort the batch.
+
+        Fetches limit+1 to accurately determine has_more without false positives.
+        """
+        # Fetch one extra to detect if there are more records
+        raw_orders = await self._data_repo.find_orders_without_items(
+            limit=limit + 1, after_external_id=after_external_id
+        )
+        has_more = len(raw_orders) > limit
+        orders = raw_orders[:limit]
+        selected = len(orders)
+        processed = orders_enriched = items_created = 0
+        unknown_products = detail_without_items = not_found = failed = 0
+
+        for order in orders:
+            try:
+                raw = await self._client.fetch_order(
+                    self._token_provider, order_id=order.external_id
+                )
+            except Exception as exc:
+                failed += 1
+                self._log_failure_safely(
+                    "bling_backfill_items_fetch_failed",
+                    entity="orders",
+                    cause=exc,
+                )
+                continue
+
+            if raw is None:
+                not_found += 1
+                continue
+
+            itens = raw.get("itens") or []
+            if not isinstance(itens, list) or len(itens) == 0:
+                detail_without_items += 1
+                continue
+
+            try:
+                async with self._data_repo.session.begin_nested():
+                    items_before = len(order.items)
+                    await self._upsert_order_items(order, itens)
+                    await self._data_repo.session.flush()
+                    new_items = len(order.items) - items_before
+                    if new_items > 0:
+                        orders_enriched += 1
+                        items_created += new_items
+            except Exception as exc:
+                failed += 1
+                self._log_failure_safely(
+                    "bling_backfill_items_upsert_failed",
+                    entity="orders",
+                    cause=exc,
+                )
+                continue
+            finally:
+                await self._record_deferred_item_errors()
+
+            processed += 1
+
+        # Count unknown product errors from this batch
+        unknown_products = len(
+            [e for e in self._deferred_item_errors if "product not found" in e[1]]
+        )
+
+        next_cursor = orders[-1].external_id if orders else None
+        remaining_without_items = await self._data_repo.count_orders_without_items()
+
+        return BackfillOrderItemsResult(
+            selected=selected,
+            processed=processed,
+            orders_enriched=orders_enriched,
+            items_created=items_created,
+            unknown_products=unknown_products,
+            detail_without_items=detail_without_items,
+            not_found=not_found,
+            failed=failed,
+            remaining_without_items=remaining_without_items,
+            next_cursor=next_cursor,
+            has_more=has_more,
         )
 
     async def _run_sync(
@@ -808,15 +909,33 @@ class BlingSyncService:
 
         items = raw.get("itens") or []
         if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    await self._upsert_order_item(order, item)
-                except OrderItemUnknownProductError as exc:
-                    self._deferred_item_errors.append((item, str(exc)))
+            await self._upsert_order_items(order, items)
+
+        # Only fetch detail for NEW orders created in this sync.
+        # Existing orders without items are handled by backfill-order-items.
+        if action == "created" and not items:
+            try:
+                detail = await self._client.fetch_order(
+                    self._token_provider, order_id=external_id
+                )
+                if detail is not None:
+                    detail_items = detail.get("itens") or []
+                    if isinstance(detail_items, list) and detail_items:
+                        await self._upsert_order_items(order, detail_items)
+            except Exception:
+                pass  # Best effort - don't fail the order upsert
+
         await self._data_repo.session.flush()
         return action
+
+    async def _upsert_order_items(self, order: Order, items: list[Any]) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                await self._upsert_order_item(order, item)
+            except OrderItemUnknownProductError as exc:
+                self._deferred_item_errors.append((item, str(exc)))
 
     async def _upsert_order_item(self, order: Order, raw: dict[str, Any]) -> None:
         item_sku = str(raw.get("codigo") or "")

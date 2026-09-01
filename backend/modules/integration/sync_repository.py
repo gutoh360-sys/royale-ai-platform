@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models.category import Category
@@ -130,3 +130,49 @@ class SyncDataRepository:
         self._session.add(listing)
         await self._session.flush()
         return listing
+
+    async def find_orders_without_items(
+        self, *, limit: int = 50, after_external_id: str | None = None
+    ) -> list[Order]:
+        """Find orders that have no OrderItems, ordered deterministically.
+
+        Uses NOT EXISTS for efficient filtering and cursor-based pagination
+        via (ordered_at, external_id) to avoid OFFSET on mutable sets.
+        """
+        stmt = (
+            select(Order)
+            .where(
+                ~select(OrderItem.id)
+                .where(OrderItem.order_id == Order.id)
+                .correlate(Order)
+                .exists()
+            )
+            .order_by(Order.ordered_at, Order.external_id)
+        )
+        if after_external_id is not None:
+            cursor_order = (
+                select(Order.ordered_at)
+                .where(Order.external_id == after_external_id)
+                .scalar_subquery()
+            )
+            stmt = stmt.where(
+                (Order.ordered_at > cursor_order)
+                | (
+                    (Order.ordered_at == cursor_order)
+                    & (Order.external_id > after_external_id)
+                )
+            )
+        stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_orders_without_items(self) -> int:
+        """Count total orders that have no OrderItems."""
+        stmt = select(func.count()).select_from(Order).where(
+            ~select(OrderItem.id)
+            .where(OrderItem.order_id == Order.id)
+            .correlate(Order)
+            .exists()
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar() or 0

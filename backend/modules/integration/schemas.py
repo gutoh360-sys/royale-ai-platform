@@ -53,3 +53,22 @@ class BackfillOrdersResponse(BaseModel):
     already_linked: int
     bling_not_found: int
     failed: int
+
+
+class BackfillOrderItemsRequest(BaseModel):
+    limit: int = 50
+    after_external_id: str | None = None
+
+
+class BackfillOrderItemsResponse(BaseModel):
+    selected: int
+    processed: int
+    orders_enriched: int
+    items_created: int
+    unknown_products: int
+    detail_without_items: int
+    not_found: int
+    failed: int
+    remaining_without_items: int
+    next_cursor: str | None
+    has_more: bool

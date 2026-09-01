@@ -13,6 +13,8 @@ from backend.modules.integration.errors import (
 )
 from backend.modules.integration.schemas import (
     AuthorizationUrlResponse,
+    BackfillOrderItemsRequest,
+    BackfillOrderItemsResponse,
     BackfillOrdersRequest,
     BackfillOrdersResponse,
     CallbackResponse,
@@ -185,4 +187,40 @@ async def backfill_orders(
         already_linked=result.already_linked,
         bling_not_found=result.bling_not_found,
         failed=result.failed,
+    )
+
+
+@router.post(
+    "/backfill-order-items",
+    response_model=BackfillOrderItemsResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def backfill_order_items(
+    body: BackfillOrderItemsRequest,
+    service: BlingSyncService = Depends(get_bling_sync_service),
+) -> BackfillOrderItemsResponse:
+    if body.limit < 1 or body.limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="limit must be between 1 and 100",
+        )
+    try:
+        result = await service.backfill_order_items(
+            limit=body.limit,
+            after_external_id=body.after_external_id,
+        )
+    except OAuthPermanentError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return BackfillOrderItemsResponse(
+        selected=result.selected,
+        processed=result.processed,
+        orders_enriched=result.orders_enriched,
+        items_created=result.items_created,
+        unknown_products=result.unknown_products,
+        detail_without_items=result.detail_without_items,
+        not_found=result.not_found,
+        failed=result.failed,
+        remaining_without_items=result.remaining_without_items,
+        next_cursor=result.next_cursor,
+        has_more=result.has_more,
     )
