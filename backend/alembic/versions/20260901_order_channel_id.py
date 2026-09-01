@@ -34,7 +34,8 @@ def upgrade() -> None:
         ["channel_id"],
         ["id"],
         ondelete="SET NULL",
-        schema="operational",
+        source_schema="operational",
+        referent_schema="operational",
     )
 
 
