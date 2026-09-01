@@ -114,6 +114,18 @@ class BlingSyncService:
     def _now() -> datetime:
         return datetime.now(UTC)
 
+    @staticmethod
+    def _parse_bling_datetime(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            dt = datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+
     async def sync(self, entity: str, sync_type: str = "full") -> SyncResult:
         if entity not in VALID_ENTITIES:
             raise ValueError(f"Unsupported entity: {entity}")
@@ -627,6 +639,7 @@ class BlingSyncService:
 
         customer = raw.get("contato") or {}
         order_number = str(raw.get("numero") or external_id)
+        bling_date = self._parse_bling_datetime(raw.get("data"))
         order = await self._data_repo.find_order_by_external_id(external_id)
         if order is None:
             order = Order(
@@ -635,13 +648,15 @@ class BlingSyncService:
                 marketplace="bling",
                 order_number=order_number,
                 customer_name=str(customer.get("nome") or "Cliente"),
-                ordered_at=self._now(),
+                ordered_at=bling_date or self._now(),
             )
             self._data_repo.session.add(order)
             await self._data_repo.session.flush()
             action = "created"
         else:
             action = "updated"
+            if bling_date is not None:
+                order.ordered_at = bling_date
 
         order.customer_document = self._clean_text(customer.get("numeroDocumento"))
         order.customer_email = self._clean_text(customer.get("email"))

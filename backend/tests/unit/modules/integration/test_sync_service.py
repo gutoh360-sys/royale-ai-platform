@@ -1802,3 +1802,266 @@ async def test_order_sync_unknown_loja_sets_channel_null(
     order = await db_session.scalar(select(Order).where(Order.external_id == "6003"))
     assert order is not None
     assert order.channel_id is None
+
+
+# --- ordered_at from Bling date ---
+
+
+async def test_order_ordered_at_uses_bling_date(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """A: New order with valid Bling date → ordered_at == Bling date."""
+    from datetime import datetime, timezone, timedelta
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    payload = {
+        "data": [
+            {
+                "id": 7001,
+                "numero": "4001",
+                "data": "2026-03-15T14:30:00-03:00",
+                "contato": {"nome": "Cliente Data"},
+                "total": {"valor": 200.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 200.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "7001"))
+    assert order is not None
+    expected = datetime(2026, 3, 15, 17, 30, 0, tzinfo=timezone.utc)
+    assert order.ordered_at == expected
+
+
+async def test_order_ordered_at_fallback_when_no_date(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """B: New order without date → ordered_at uses fallback (self._now())."""
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    payload = {
+        "data": [
+            {
+                "id": 7002,
+                "numero": "4002",
+                "contato": {"nome": "Cliente Sem Data"},
+                "total": {"valor": 50.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 50.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    before = service._now()
+    result = await service.sync_orders()
+    after = service._now()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "7002"))
+    assert order is not None
+    assert before <= order.ordered_at <= after
+
+
+async def test_order_ordered_at_corrected_on_resync(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """C: Existing order with wrong ordered_at + valid Bling date → corrected."""
+    from datetime import datetime, timezone
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    # First sync: no date → ordered_at = now
+    payload_v1 = {
+        "data": [
+            {
+                "id": 7003,
+                "numero": "4003",
+                "contato": {"nome": "Cliente Resync"},
+                "total": {"valor": 100.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 100.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload_v1)
+    service = await _make_service(db_session, client, settings)
+    await service.sync_orders()
+    await db_session.commit()
+
+    order_before = await db_session.scalar(select(Order).where(Order.external_id == "7003"))
+    ordered_at_v1 = order_before.ordered_at
+
+    # Second sync: with real Bling date
+    payload_v2 = {
+        "data": [
+            {
+                "id": 7003,
+                "numero": "4003",
+                "data": "2025-12-01T09:00:00-03:00",
+                "contato": {"nome": "Cliente Resync"},
+                "total": {"valor": 100.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 100.0}],
+            }
+        ],
+    }
+    client2 = _order_client(settings, payload_v2)
+    service2 = await _make_service(db_session, client2, settings)
+    await service2.sync_orders()
+    await db_session.commit()
+
+    order_after = await db_session.scalar(select(Order).where(Order.external_id == "7003"))
+    expected = datetime(2025, 12, 1, 12, 0, 0, tzinfo=timezone.utc)
+    assert order_after.ordered_at == expected
+    assert order_after.ordered_at != ordered_at_v1
+
+
+async def test_order_ordered_at_preserved_when_no_date_on_resync(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """D: Existing order without date in payload → ordered_at preserved."""
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    # First sync: with date
+    payload_v1 = {
+        "data": [
+            {
+                "id": 7004,
+                "numero": "4004",
+                "data": "2026-06-10T12:00:00-03:00",
+                "contato": {"nome": "Cliente Preserve"},
+                "total": {"valor": 75.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 75.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload_v1)
+    service = await _make_service(db_session, client, settings)
+    await service.sync_orders()
+    await db_session.commit()
+
+    order_v1 = await db_session.scalar(select(Order).where(Order.external_id == "7004"))
+    ordered_at_v1 = order_v1.ordered_at
+
+    # Second sync: without date
+    payload_v2 = {
+        "data": [
+            {
+                "id": 7004,
+                "numero": "4004",
+                "contato": {"nome": "Cliente Preserve"},
+                "total": {"valor": 75.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 75.0}],
+            }
+        ],
+    }
+    client2 = _order_client(settings, payload_v2)
+    service2 = await _make_service(db_session, client2, settings)
+    await service2.sync_orders()
+    await db_session.commit()
+
+    order_v2 = await db_session.scalar(select(Order).where(Order.external_id == "7004"))
+    assert order_v2.ordered_at == ordered_at_v1
+
+
+async def test_order_ordered_at_timezone_aware(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """E: Date with -03:00 timezone → parsed as timezone-aware datetime."""
+    from datetime import datetime, timezone
+    from backend.database.models.order import Order
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    payload = {
+        "data": [
+            {
+                "id": 7005,
+                "numero": "4005",
+                "data": "2026-07-20T18:45:00-03:00",
+                "contato": {"nome": "Cliente TZ"},
+                "total": {"valor": 300.0},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 300.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "7005"))
+    assert order is not None
+    assert order.ordered_at.tzinfo is not None
+    expected = datetime(2026, 7, 20, 21, 45, 0, tzinfo=timezone.utc)
+    assert order.ordered_at == expected
+
+
+async def test_order_ordered_at_and_channel_id_coexist(
+    db_session: AsyncSession,
+    settings: Settings,
+) -> None:
+    """F: ordered_at from Bling date and channel_id from loja both resolve."""
+    from datetime import datetime, timezone
+    from backend.database.models.order import Order
+    from backend.database.models.sales_channel import SalesChannel
+
+    service = await _make_service(db_session, _make_client(settings, _products_payload()), settings)
+    await service.sync_products()
+    await db_session.commit()
+
+    channel = SalesChannel(bling_id="55", name="Shopee", tipo="SHOPEE", agrupador=3, situacao=1)
+    db_session.add(channel)
+    await db_session.flush()
+
+    payload = {
+        "data": [
+            {
+                "id": 7006,
+                "numero": "4006",
+                "data": "2026-08-01T08:00:00-03:00",
+                "contato": {"nome": "Cliente Completo"},
+                "total": {"valor": 500.0},
+                "loja": {"id": 55, "descricao": "Shopee"},
+                "itens": [{"codigo": "SKU-001", "quantidade": 1, "valor": 500.0}],
+            }
+        ],
+    }
+    client = _order_client(settings, payload)
+    service = await _make_service(db_session, client, settings)
+    result = await service.sync_orders()
+    await db_session.commit()
+
+    assert result.items_created == 1
+    order = await db_session.scalar(select(Order).where(Order.external_id == "7006"))
+    assert order is not None
+    expected_date = datetime(2026, 8, 1, 11, 0, 0, tzinfo=timezone.utc)
+    assert order.ordered_at == expected_date
+    assert order.channel_id == channel.id
