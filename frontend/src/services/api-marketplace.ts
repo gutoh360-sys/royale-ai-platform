@@ -3,7 +3,7 @@ import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
 import type { Order, SalesChannel } from "@/types/api";
 import type { MarketplaceData, MarketplaceSummaryData, MarketplaceDataResult } from "@/features/marketplace/types";
-import { groupChannelsByMarketplace } from "@/features/marketplace/utils/grouping";
+import { groupChannelsByMarketplace, resolveMarketplaceGroup } from "@/features/marketplace/utils/grouping";
 
 function channelOrders(channel: SalesChannel, orders: Order[]): Order[] {
   const channelName = (channel.name ?? "").toLowerCase();
