@@ -233,6 +233,30 @@ class BlingApiClient:
             max_pages=max_pages,
         )
 
+    async def fetch_products_page(
+        self,
+        token_provider: Callable[[], Awaitable[str]],
+        *,
+        page: int,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str | int] = {
+            "limite": page_size,
+            "criterio": 2,
+            "tipo": "T",
+            "pagina": page,
+        }
+        response = await self.get_authenticated("/produtos", token_provider, params)
+        if response.status_code != 200:
+            raise ApiError(
+                f"fetch products page {page} failed with status {response.status_code}"
+            )
+        body = response.json()
+        payload = body.get("data")
+        if isinstance(payload, list):
+            return cast(list[dict[str, Any]], payload)
+        return []
+
     async def fetch_categories(
         self,
         token_provider: Callable[[], Awaitable[str]],

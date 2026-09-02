@@ -102,6 +102,23 @@ class BackfillOrderItemsResult:
     has_more: bool
 
 
+@dataclass(frozen=True)
+class SyncProductsBatchResult:
+    start_page: int
+    end_page: int
+    pages_processed: int
+    fetched: int
+    processed: int
+    created: int
+    updated: int
+    skipped: int
+    failed: int
+    next_page: int | None
+    has_more: bool
+    natural_end: bool
+    skip_reasons: dict[str, int]
+
+
 class IncompleteSyncItemError(Exception):
     """Raised when a synced item is missing required fields."""
 
@@ -184,6 +201,103 @@ class BlingSyncService:
             ),
             upsert=self._upsert_product,
         )
+
+    async def sync_products_batch(
+        self,
+        *,
+        start_page: int = 1,
+        pages: int = 5,
+        page_size: int = 100,
+    ) -> SyncProductsBatchResult:
+        skip_reasons: dict[str, int] = {}
+        processed = created = updated = skipped = failed = fetched = 0
+        current_page = start_page
+        natural_end = False
+
+        for _ in range(pages):
+            try:
+                items = await self._client.fetch_products_page(
+                    self._token_provider, page=current_page, page_size=page_size
+                )
+            except Exception as exc:
+                self._log_failure_safely(
+                    "bling_sync_products_batch_page_failed",
+                    entity="products",
+                    cause=exc,
+                )
+                failed += 1
+                break
+
+            fetched += len(items)
+
+            if len(items) < page_size:
+                natural_end = True
+
+            for raw in items:
+                try:
+                    async with self._data_repo.session.begin_nested():
+                        outcome = await self._upsert_product(raw)
+                except IncompleteSyncItemError as exc:
+                    skipped += 1
+                    reason = self._classify_skip_reason(str(exc))
+                    skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+                    continue
+                except DuplicateSkuError:
+                    skipped += 1
+                    skip_reasons["duplicate_sku"] = skip_reasons.get("duplicate_sku", 0) + 1
+                    continue
+                except Exception as exc:
+                    failed += 1
+                    self._log_failure_safely(
+                        "bling_sync_products_batch_item_failed",
+                        entity="products",
+                        cause=exc,
+                    )
+                    continue
+                finally:
+                    await self._record_deferred_item_errors()
+                processed += 1
+                if outcome == "created":
+                    created += 1
+                elif outcome == "updated":
+                    updated += 1
+
+            if natural_end:
+                break
+
+            current_page += 1
+
+        has_more = not natural_end
+        last_processed_page = current_page - 1 if has_more else current_page
+        next_page = current_page if has_more else None
+        actual_pages = (current_page - start_page) if natural_end else pages
+
+        return SyncProductsBatchResult(
+            start_page=start_page,
+            end_page=last_processed_page,
+            pages_processed=actual_pages,
+            fetched=fetched,
+            processed=processed,
+            created=created,
+            updated=updated,
+            skipped=skipped,
+            failed=failed,
+            next_page=next_page,
+            has_more=has_more,
+            natural_end=natural_end,
+            skip_reasons=skip_reasons,
+        )
+
+    @staticmethod
+    def _classify_skip_reason(reason: str) -> str:
+        lower = reason.lower()
+        if "missing id" in lower:
+            return "missing_id"
+        if "missing codigo" in lower:
+            return "missing_codigo"
+        if "missing nome" in lower:
+            return "missing_nome"
+        return "other"
 
     async def sync_marketplaces(self, agrupador: int = 3) -> SyncResult:
         return await self._run_sync(

@@ -72,3 +72,24 @@ class BackfillOrderItemsResponse(BaseModel):
     remaining_without_items: int
     next_cursor: str | None
     has_more: bool
+
+
+class SyncProductsBatchRequest(BaseModel):
+    start_page: int = 1
+    pages: int = 5
+
+
+class SyncProductsBatchResponse(BaseModel):
+    start_page: int
+    end_page: int
+    pages_processed: int
+    fetched: int
+    processed: int
+    created: int
+    updated: int
+    skipped: int
+    failed: int
+    next_page: int | None
+    has_more: bool
+    natural_end: bool
+    skip_reasons: dict[str, int]

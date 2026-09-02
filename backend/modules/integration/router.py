@@ -20,6 +20,8 @@ from backend.modules.integration.schemas import (
     CallbackResponse,
     ConnectionStatusResponse,
     ConnectionTestResponse,
+    SyncProductsBatchRequest,
+    SyncProductsBatchResponse,
     SyncTriggerResponse,
 )
 from backend.modules.integration.service import IntegrationConnectionService
@@ -223,4 +225,47 @@ async def backfill_order_items(
         remaining_without_items=result.remaining_without_items,
         next_cursor=result.next_cursor,
         has_more=result.has_more,
+    )
+
+
+@router.post(
+    "/sync-products-batch",
+    response_model=SyncProductsBatchResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def sync_products_batch(
+    body: SyncProductsBatchRequest,
+    service: BlingSyncService = Depends(get_bling_sync_service),
+) -> SyncProductsBatchResponse:
+    if body.start_page < 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_page must be >= 1",
+        )
+    if body.pages < 1 or body.pages > 10:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="pages must be between 1 and 10",
+        )
+    try:
+        result = await service.sync_products_batch(
+            start_page=body.start_page,
+            pages=body.pages,
+        )
+    except OAuthPermanentError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return SyncProductsBatchResponse(
+        start_page=result.start_page,
+        end_page=result.end_page,
+        pages_processed=result.pages_processed,
+        fetched=result.fetched,
+        processed=result.processed,
+        created=result.created,
+        updated=result.updated,
+        skipped=result.skipped,
+        failed=result.failed,
+        next_page=result.next_page,
+        has_more=result.has_more,
+        natural_end=result.natural_end,
+        skip_reasons=result.skip_reasons,
     )
