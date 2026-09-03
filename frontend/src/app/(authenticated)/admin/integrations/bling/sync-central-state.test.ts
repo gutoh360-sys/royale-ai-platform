@@ -11,6 +11,7 @@ import {
 } from "./sync-central-state";
 import { filterPermissions } from "@/auth/application/permission-service";
 import { NAV_ITEMS } from "@/features/navigation/config";
+import { normalizeInternalHref } from "@/features/navigation/navigation-url";
 
 const root = resolve(__dirname, "../../../../..");
 
@@ -87,6 +88,22 @@ describe("Bling sync central runtime safety", () => {
 });
 
 describe("Bling sync central navigation", () => {
+  it('normalizes pathname="/admin/integrations/bling" without producing a protocol-relative URL', () => {
+    expect(normalizeInternalHref("/admin/integrations/bling")).toBe(
+      "/admin/integrations/bling",
+    );
+    expect(normalizeInternalHref("//admin/integrations/bling")).toBe(
+      "/admin/integrations/bling",
+    );
+  });
+
+  it("keeps navigation URLs same-origin and relative", () => {
+    expect(normalizeInternalHref("//admin/integrations/bling")).not.toMatch(/^\/\//);
+    expect(normalizeInternalHref("//admin/integrations/bling")).not.toContain(
+      "https://admin/",
+    );
+  });
+
   it("adds Sync Bling to the real nav source", () => {
     const item = NAV_ITEMS.find((navItem) => navItem.label === "Sync Bling");
 
@@ -98,6 +115,14 @@ describe("Bling sync central navigation", () => {
 
     expect(visible.some((item) => item.label === "Sync Bling")).toBe(true);
   });
+
+  it("does not contain protocol-relative or https://admin menu hrefs", () => {
+    const hrefs = NAV_ITEMS.map((item) => normalizeInternalHref(item.href));
+
+    expect(hrefs).not.toContain("//admin/integrations/bling");
+    expect(hrefs.some((href) => href.startsWith("//"))).toBe(false);
+    expect(hrefs.some((href) => href.startsWith("https://admin/"))).toBe(false);
+  });
 });
 
 describe("Bling sync central secret boundary", () => {
@@ -106,6 +131,7 @@ describe("Bling sync central secret boundary", () => {
 
     expect(page).not.toMatch(/ADMIN_USERNAME|ADMIN_PASSWORD|BACKEND_URL|NEXT_PUBLIC/);
     expect(page).not.toMatch(/Authorization|Basic\s/);
+    expect(page).not.toMatch(/history\.replaceState|history\.pushState/);
   });
 
   it("keeps sync-status credentials server-side only", () => {

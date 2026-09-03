@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { NavItem } from "@/features/navigation/config";
+import { normalizeInternalHref } from "@/features/navigation/navigation-url";
 
 interface NavigationItemProps {
   item: NavItem;
@@ -13,11 +14,12 @@ interface NavigationItemProps {
 
 export function NavigationItem({ item, collapsed }: NavigationItemProps) {
   const pathname = usePathname();
-  const isActive = pathname === item.href;
+  const href = item.disabled ? "#" : normalizeInternalHref(item.href);
+  const isActive = pathname === href;
 
   return (
     <Link
-      href={item.disabled ? "#" : item.href}
+      href={href}
       aria-current={isActive ? "page" : undefined}
       aria-disabled={item.disabled}
       tabIndex={item.disabled ? -1 : 0}
