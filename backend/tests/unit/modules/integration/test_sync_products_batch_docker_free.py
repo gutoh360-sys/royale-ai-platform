@@ -22,12 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.core.config.base import Settings
-from backend.modules.integration.sync_service import (
-    BlingSyncService,
-    IncompleteSyncItemError,
-    ProductIncompleteError,
-    DuplicateSkuError,
-)
+from backend.modules.integration.sync_service import BlingSyncService
 
 
 @pytest.fixture
@@ -348,3 +343,62 @@ class TestSyncProductsBatchUpsert:
         assert result.processed == 1
         assert result.skipped == 2
         assert sum(result.skip_reasons.values()) == 2
+
+
+class TestStockQuantityNormalization:
+    """Tests for _stock_quantity clamping negative values to 0."""
+
+    def test_positive_stock(self):
+        """A: saldo 10 → stock_quantity 10."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": {"saldoVirtualTotal": 10}}
+        assert BlingSyncService._stock_quantity(raw) == 10
+
+    def test_zero_stock(self):
+        """B: saldo 0 → stock_quantity 0."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": {"saldoVirtualTotal": 0}}
+        assert BlingSyncService._stock_quantity(raw) == 0
+
+    def test_negative_one_stock(self):
+        """C: saldo -1 → stock_quantity 0."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": {"saldoVirtualTotal": -1}}
+        assert BlingSyncService._stock_quantity(raw) == 0
+
+    def test_negative_ten_stock(self):
+        """D: saldo -10 → stock_quantity 0."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": {"saldoVirtualTotal": -10}}
+        assert BlingSyncService._stock_quantity(raw) == 0
+
+    def test_negative_string_stock(self):
+        """E: saldo string "-1" → 0."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": {"saldoVirtualTotal": "-1"}}
+        assert BlingSyncService._stock_quantity(raw) == 0
+
+    def test_negative_decimal_stock(self):
+        """F: saldo decimal "-1.5" → int(float(-1.5)) = -1 → clamp to 0."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": {"saldoVirtualTotal": "-1.5"}}
+        assert BlingSyncService._stock_quantity(raw) == 0
+
+    def test_missing_estoque(self):
+        """Sem estoque → 0."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        assert BlingSyncService._stock_quantity({}) == 0
+
+    def test_stock_list_format(self):
+        """Estoque em formato lista."""
+        from backend.modules.integration.sync_service import BlingSyncService
+
+        raw = {"estoque": [{"saldoVirtualTotal": -3}]}
+        assert BlingSyncService._stock_quantity(raw) == 0

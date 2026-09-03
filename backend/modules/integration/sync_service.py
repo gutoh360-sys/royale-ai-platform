@@ -761,7 +761,7 @@ class BlingSyncService:
         if value is None:
             return 0
         try:
-            return int(float(value))
+            return max(int(float(value)), 0)
         except (TypeError, ValueError):
             return 0
 
