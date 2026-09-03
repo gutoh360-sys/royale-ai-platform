@@ -1,31 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageTitle } from "@/components/shell/page-title";
 import {
-  Play,
-  Pause,
-  RotateCcw,
-  RefreshCw,
-  Package,
-  ShoppingCart,
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  Package,
+  Pause,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  ShoppingCart,
   XCircle,
 } from "lucide-react";
-
-interface SyncStatus {
-  products_count: number;
-  orders_count: number;
-  order_items_count: number;
-  orders_without_items: number;
-  orders_without_channel: number;
-}
+import {
+  PRODUCT_SYNC_FALLBACK,
+  parseProductSyncState,
+  parseSyncStatus,
+  type ProductSyncTotals,
+  type SyncStatus,
+} from "./sync-central-state";
 
 interface ProductBatchResult {
   start_page: number;
@@ -64,23 +63,26 @@ interface LogEntry {
 }
 
 type SyncStatusEnum = "idle" | "running" | "paused" | "completed" | "error";
+type AddLog = (message: string, type?: LogEntry["type"]) => void;
 
 const STORAGE_KEY_PRODUCTS = "royale-sync-products";
-const STORAGE_KEY_ORDER_ITEMS = "royale-sync-order-items";
 
-function loadState<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
+function readStoredProductSyncState() {
+  if (typeof window === "undefined") return PRODUCT_SYNC_FALLBACK;
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    return parseProductSyncState(window.localStorage.getItem(STORAGE_KEY_PRODUCTS));
   } catch {
-    return fallback;
+    return PRODUCT_SYNC_FALLBACK;
   }
 }
 
-function saveState(key: string, value: unknown) {
+function saveProductSyncState(value: unknown) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    window.localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(value));
+  } catch {
+    return;
+  }
 }
 
 function timestamp() {
@@ -91,104 +93,106 @@ function timestamp() {
   });
 }
 
-function formatNumber(n: number): string {
-  return n.toLocaleString("pt-BR");
+function formatNumber(n: unknown): string {
+  return typeof n === "number" && Number.isFinite(n)
+    ? n.toLocaleString("pt-BR")
+    : "0";
 }
 
 export default function BlingSyncPage() {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const addLog = useCallback<AddLog>((message, type = "info") => {
+    setLogs((prev) => [...prev.slice(-49), { time: timestamp(), message, type }]);
+  }, []);
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 p-6">
       <PageTitle
         title="Central de Sincronização Bling"
         description="Operações de sincronização e backfill do Bling."
       />
-      <ProductSyncCard />
-      <OrderItemsCard />
-      <ActivityLog />
+      <ProductSyncCard addLog={addLog} />
+      <OrderItemsCard addLog={addLog} />
+      <ActivityLog logs={logs} />
     </div>
   );
 }
 
-function ProductSyncCard() {
+function ProductSyncCard({ addLog }: { addLog: AddLog }) {
   const [status, setStatus] = useState<SyncStatusEnum>("idle");
-  const [startPage, setStartPage] = useState(1);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totals, setTotals] = useState({
-    fetched: 0,
-    processed: 0,
-    created: 0,
-    updated: 0,
-    skipped: 0,
-    failed: 0,
-  });
+  const [startPage, setStartPage] = useState(PRODUCT_SYNC_FALLBACK.startPage);
+  const [currentPage, setCurrentPage] = useState(PRODUCT_SYNC_FALLBACK.currentPage);
+  const [totals, setTotals] = useState<ProductSyncTotals>(PRODUCT_SYNC_FALLBACK.totals);
   const [lastBatch, setLastBatch] = useState<ProductBatchResult | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const runningRef = useRef(false);
   const abortRef = useRef(false);
 
   useEffect(() => {
-    const saved = loadState(STORAGE_KEY_PRODUCTS, {
-      startPage: 1,
-      currentPage: 1,
-      totals: { fetched: 0, processed: 0, created: 0, updated: 0, skipped: 0, failed: 0 },
-    });
+    const saved = readStoredProductSyncState();
     setStartPage(saved.startPage);
     setCurrentPage(saved.currentPage);
     setTotals(saved.totals);
+    setStorageReady(true);
   }, []);
 
   useEffect(() => {
-    saveState(STORAGE_KEY_PRODUCTS, { startPage, currentPage, totals });
-  }, [startPage, currentPage, totals]);
+    if (!storageReady) return;
+    saveProductSyncState({ startPage, currentPage, totals });
+  }, [storageReady, startPage, currentPage, totals]);
 
   const fetchStatus = useCallback(async () => {
+    setStatusLoading(true);
+    setStatusError(null);
+
     try {
       const res = await fetch("/api/integrations/sync-status");
-      if (res.ok) setSyncStatus(await res.json());
-    } catch {
-      /* ignore */
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const parsed = parseSyncStatus(await res.json());
+      if (!parsed) throw new Error("Resposta inválida");
+
+      setSyncStatus(parsed);
+    } catch (err) {
+      setSyncStatus(null);
+      setStatusError("Não foi possível carregar o status");
+      addLog(
+        `Erro ao carregar status: ${err instanceof Error ? err.message : "desconhecido"}`,
+        "error",
+      );
+    } finally {
+      setStatusLoading(false);
     }
-  }, []);
+  }, [addLog]);
 
   useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus, totals]);
+    void fetchStatus();
+  }, [fetchStatus]);
 
-  const addLog = useCallback(
-    (message: string, type: LogEntry["type"] = "info") => {
-      window.dispatchEvent(
-        new CustomEvent("sync-log", { detail: { time: timestamp(), message, type } }),
-      );
-    },
-    [],
-  );
-
-  const runBatch = useCallback(
-    async (page: number): Promise<ProductBatchResult | null> => {
-      const res = await fetch("/api/integrations/sync-products-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_page: page, pages: 10 }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-    [],
-  );
+  const runBatch = useCallback(async (page: number): Promise<ProductBatchResult> => {
+    const res = await fetch("/api/integrations/sync-products-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_page: page, pages: 10 }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }, []);
 
   const startSync = useCallback(async () => {
     if (runningRef.current) return;
     runningRef.current = true;
     abortRef.current = false;
     setStatus("running");
-    addLog(`Páginas ${startPage}–${startPage + 9} iniciadas`);
+    addLog(`Páginas ${startPage}-${startPage + 9} iniciadas`);
 
     let page = startPage;
     try {
       while (!abortRef.current) {
         const result = await runBatch(page);
-        if (!result) break;
-
         setLastBatch(result);
         setTotals((prev) => ({
           fetched: prev.fetched + result.fetched,
@@ -200,7 +204,7 @@ function ProductSyncCard() {
         }));
 
         addLog(
-          `${result.start_page}–${result.end_page} concluído: ${formatNumber(result.processed)} processados, ${formatNumber(result.created)} criados, ${formatNumber(result.skipped)} ignorados`,
+          `${result.start_page}-${result.end_page} concluído: ${formatNumber(result.processed)} processados, ${formatNumber(result.created)} criados, ${formatNumber(result.skipped)} ignorados`,
           result.failed > 0 ? "error" : "success",
         );
 
@@ -213,6 +217,7 @@ function ProductSyncCard() {
         if (result.natural_end || !result.has_more || !result.next_page) {
           setStatus("completed");
           addLog("Catálogo concluído", "success");
+          void fetchStatus();
           break;
         }
 
@@ -226,7 +231,7 @@ function ProductSyncCard() {
     } finally {
       runningRef.current = false;
     }
-  }, [startPage, runBatch, addLog]);
+  }, [startPage, runBatch, addLog, fetchStatus]);
 
   const pause = useCallback(() => {
     abortRef.current = true;
@@ -234,37 +239,23 @@ function ProductSyncCard() {
     addLog("Sincronização pausada", "warning");
   }, [addLog]);
 
-  const resume = useCallback(() => {
-    if (status === "paused") {
-      startSync();
-    }
-  }, [status, startSync]);
-
   const reset = useCallback(() => {
     abortRef.current = true;
     runningRef.current = false;
     setStatus("idle");
-    setCurrentPage(1);
-    setStartPage(1);
-    setTotals({ fetched: 0, processed: 0, created: 0, updated: 0, skipped: 0, failed: 0 });
+    setCurrentPage(PRODUCT_SYNC_FALLBACK.currentPage);
+    setStartPage(PRODUCT_SYNC_FALLBACK.startPage);
+    setTotals(PRODUCT_SYNC_FALLBACK.totals);
     setLastBatch(null);
     addLog("Estado resetado", "info");
   }, [addLog]);
-
-  const statusConfig: Record<SyncStatusEnum, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }> = {
-    idle: { label: "Parado", variant: "secondary", icon: <Package className="h-3 w-3" /> },
-    running: { label: "Executando", variant: "default", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
-    paused: { label: "Pausado", variant: "outline", icon: <Pause className="h-3 w-3" /> },
-    completed: { label: "Concluído", variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
-    error: { label: "Erro", variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
-  };
 
   const sc = statusConfig[status];
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
             Produtos
@@ -276,7 +267,14 @@ function ProductSyncCard() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {syncStatus && (
+        {statusError ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            <span>{statusError}</span>
+            <Button size="sm" variant="outline" onClick={() => void fetchStatus()}>
+              Tentar novamente
+            </Button>
+          </div>
+        ) : syncStatus ? (
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
             <Stat label="Produtos no Royale" value={formatNumber(syncStatus.products_count)} />
             <Stat label="Pedidos" value={formatNumber(syncStatus.orders_count)} />
@@ -284,7 +282,9 @@ function ProductSyncCard() {
             <Stat label="Pedidos sem itens" value={formatNumber(syncStatus.orders_without_items)} />
             <Stat label="Sem canal" value={formatNumber(syncStatus.orders_without_channel)} />
           </div>
-        )}
+        ) : statusLoading ? (
+          <div className="text-sm text-muted-foreground">Carregando status...</div>
+        ) : null}
 
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-32">
@@ -293,7 +293,7 @@ function ProductSyncCard() {
               type="number"
               min={1}
               value={startPage}
-              onChange={(e) => setStartPage(Math.max(1, parseInt(e.target.value) || 1))}
+              onChange={(e) => setStartPage(Math.max(1, parseInt(e.target.value, 10) || 1))}
               disabled={status === "running"}
               className="h-8"
             />
@@ -312,7 +312,7 @@ function ProductSyncCard() {
               </Button>
             )}
             {status === "paused" && (
-              <Button size="sm" onClick={resume} className="gap-1.5">
+              <Button size="sm" onClick={startSync} className="gap-1.5">
                 <Play className="h-3.5 w-3.5" />
                 Retomar
               </Button>
@@ -333,20 +333,13 @@ function ProductSyncCard() {
             <Stat label="Criados" value={formatNumber(totals.created)} />
             <Stat label="Atualizados" value={formatNumber(totals.updated)} />
             <Stat label="Ignorados" value={formatNumber(totals.skipped)} />
-            <Stat
-              label="Falhas"
-              value={formatNumber(totals.failed)}
-              className={totals.failed > 0 ? "text-destructive" : ""}
-            />
+            <Stat label="Falhas" value={formatNumber(totals.failed)} className={totals.failed > 0 ? "text-destructive" : ""} />
           </div>
         )}
 
-        {lastBatch && lastBatch.skip_reasons && Object.keys(lastBatch.skip_reasons).length > 0 && (
+        {lastBatch?.skip_reasons && Object.keys(lastBatch.skip_reasons).length > 0 && (
           <div className="text-xs text-muted-foreground">
-            Skip reasons:{" "}
-            {Object.entries(lastBatch.skip_reasons)
-              .map(([k, v]) => `${k}=${v}`)
-              .join(", ")}
+            Skip reasons: {Object.entries(lastBatch.skip_reasons).map(([k, v]) => `${k}=${v}`).join(", ")}
           </div>
         )}
       </CardContent>
@@ -354,7 +347,7 @@ function ProductSyncCard() {
   );
 }
 
-function OrderItemsCard() {
+function OrderItemsCard({ addLog }: { addLog: AddLog }) {
   const [status, setStatus] = useState<SyncStatusEnum>("idle");
   const [totals, setTotals] = useState({
     processed: 0,
@@ -367,15 +360,6 @@ function OrderItemsCard() {
   const [remaining, setRemaining] = useState<number | null>(null);
   const runningRef = useRef(false);
   const abortRef = useRef(false);
-
-  const addLog = useCallback(
-    (message: string, type: LogEntry["type"] = "info") => {
-      window.dispatchEvent(
-        new CustomEvent("sync-log", { detail: { time: timestamp(), message, type } }),
-      );
-    },
-    [],
-  );
 
   const runBatch = useCallback(async (cursor?: string): Promise<OrderItemsResult> => {
     const res = await fetch("/api/integrations/backfill-order-items", {
@@ -398,7 +382,6 @@ function OrderItemsCard() {
     try {
       while (!abortRef.current) {
         const result = await runBatch(cursor);
-
         setTotals((prev) => ({
           processed: prev.processed + result.processed,
           orders_enriched: prev.orders_enriched + result.orders_enriched,
@@ -442,20 +425,12 @@ function OrderItemsCard() {
     addLog("Backfill pausado", "warning");
   }, [addLog]);
 
-  const statusConfig: Record<SyncStatusEnum, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }> = {
-    idle: { label: "Parado", variant: "secondary", icon: <ShoppingCart className="h-3 w-3" /> },
-    running: { label: "Executando", variant: "default", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
-    paused: { label: "Pausado", variant: "outline", icon: <Pause className="h-3 w-3" /> },
-    completed: { label: "Concluído", variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
-    error: { label: "Erro", variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
-  };
-
   const sc = statusConfig[status];
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2">
             <ShoppingCart className="h-5 w-5" />
             Itens dos Pedidos
@@ -487,17 +462,9 @@ function OrderItemsCard() {
             <Stat label="Processados" value={formatNumber(totals.processed)} />
             <Stat label="Pedidos enriquecidos" value={formatNumber(totals.orders_enriched)} />
             <Stat label="Itens criados" value={formatNumber(totals.items_created)} />
-            <Stat
-              label="Produtos desconhecidos"
-              value={formatNumber(totals.unknown_products)}
-              className={totals.unknown_products > 0 ? "text-yellow-500" : ""}
-            />
+            <Stat label="Produtos desconhecidos" value={formatNumber(totals.unknown_products)} className={totals.unknown_products > 0 ? "text-yellow-500" : ""} />
             <Stat label="Não encontrados" value={formatNumber(totals.not_found)} />
-            <Stat
-              label="Falhas"
-              value={formatNumber(totals.failed)}
-              className={totals.failed > 0 ? "text-destructive" : ""}
-            />
+            <Stat label="Falhas" value={formatNumber(totals.failed)} className={totals.failed > 0 ? "text-destructive" : ""} />
           </div>
         )}
 
@@ -511,18 +478,8 @@ function OrderItemsCard() {
   );
 }
 
-function ActivityLog() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+function ActivityLog({ logs }: { logs: LogEntry[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<LogEntry>).detail;
-      setLogs((prev) => [...prev.slice(-49), detail]);
-    };
-    window.addEventListener("sync-log", handler);
-    return () => window.removeEventListener("sync-log", handler);
-  }, []);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -530,34 +487,18 @@ function ActivityLog() {
     }
   }, [logs]);
 
-  const iconForType = (type: LogEntry["type"]) => {
-    switch (type) {
-      case "success":
-        return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
-      case "error":
-        return <AlertTriangle className="h-3.5 w-3.5 text-destructive" />;
-      case "warning":
-        return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />;
-      default:
-        return <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />;
-    }
-  };
-
   return (
     <Card>
       <CardHeader>
         <CardTitle>Atividade</CardTitle>
       </CardHeader>
       <CardContent>
-        <div
-          ref={containerRef}
-          className="max-h-64 space-y-1 overflow-y-auto font-mono text-xs"
-        >
+        <div ref={containerRef} className="max-h-64 space-y-1 overflow-y-auto font-mono text-xs">
           {logs.length === 0 && (
             <div className="text-muted-foreground">Nenhuma atividade ainda.</div>
           )}
           {logs.map((log, i) => (
-            <div key={i} className="flex items-start gap-2">
+            <div key={`${log.time}-${i}`} className="flex items-start gap-2">
               {iconForType(log.type)}
               <span className="text-muted-foreground">{log.time}</span>
               <span>{log.message}</span>
@@ -569,19 +510,35 @@ function ActivityLog() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
+function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={`font-medium ${className ?? ""}`}>{value}</div>
     </div>
   );
+}
+
+const statusConfig: Record<
+  SyncStatusEnum,
+  { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: ReactNode }
+> = {
+  idle: { label: "Parado", variant: "secondary", icon: <Package className="h-3 w-3" /> },
+  running: { label: "Executando", variant: "default", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  paused: { label: "Pausado", variant: "outline", icon: <Pause className="h-3 w-3" /> },
+  completed: { label: "Concluído", variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
+  error: { label: "Erro", variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
+};
+
+function iconForType(type: LogEntry["type"]) {
+  switch (type) {
+    case "success":
+      return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+    case "error":
+      return <AlertTriangle className="h-3.5 w-3.5 text-destructive" />;
+    case "warning":
+      return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />;
+    default:
+      return <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />;
+  }
 }

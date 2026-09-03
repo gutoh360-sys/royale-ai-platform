@@ -31,7 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: ShoppingCart, label: "Compras", href: "/purchasing", permission: Permissions.Purchasing.View },
   { icon: Bot, label: "IA", href: "/ai", disabled: true, permission: Permissions.AI.Access },
   { icon: BarChart3, label: "Relatórios", href: "/reports", disabled: true, permission: Permissions.Reports.View },
-  { icon: RefreshCw, label: "Sync Bling", href: "/admin/integrations/bling", permission: Permissions.Settings.Manage },
+  { icon: RefreshCw, label: "Sync Bling", href: "/admin/integrations/bling" },
   { icon: Settings, label: "Configurações", href: "/settings", disabled: true, permission: Permissions.Settings.Manage },
   { icon: LayoutDashboard, label: "Copiloto Executivo", href: "/executive-copilot", permission: Permissions.Copilot.Access },
 ];

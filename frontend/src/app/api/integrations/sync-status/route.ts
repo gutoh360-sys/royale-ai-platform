@@ -12,7 +12,7 @@ export async function GET() {
     );
   }
 
-  const auth = "Basic " + btoa(`${ADMIN_USER}:${ADMIN_PASS}`);
+  const auth = "Basic " + Buffer.from(`${ADMIN_USER}:${ADMIN_PASS}`).toString("base64");
 
   try {
     const res = await fetch(`${BACKEND}/integrations/bling/sync-status`, {
