@@ -22,6 +22,7 @@ from backend.modules.integration.schemas import (
     ConnectionTestResponse,
     SyncProductsBatchRequest,
     SyncProductsBatchResponse,
+    SyncStatusResponse,
     SyncTriggerResponse,
 )
 from backend.modules.integration.service import IntegrationConnectionService
@@ -269,3 +270,14 @@ async def sync_products_batch(
         natural_end=result.natural_end,
         skip_reasons=result.skip_reasons,
     )
+
+
+@router.get(
+    "/sync-status",
+    response_model=SyncStatusResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def get_sync_status(
+    service: BlingSyncService = Depends(get_bling_sync_service),
+) -> SyncStatusResponse:
+    return await service.get_sync_status()

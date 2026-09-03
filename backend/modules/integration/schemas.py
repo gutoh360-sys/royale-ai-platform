@@ -93,3 +93,11 @@ class SyncProductsBatchResponse(BaseModel):
     has_more: bool
     natural_end: bool
     skip_reasons: dict[str, int]
+
+
+class SyncStatusResponse(BaseModel):
+    products_count: int
+    orders_count: int
+    order_items_count: int
+    orders_without_items: int
+    orders_without_channel: int

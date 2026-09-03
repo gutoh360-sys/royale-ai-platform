@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import contextlib
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import IntegrityError
 
@@ -19,6 +21,9 @@ from backend.database.models.sync import SyncError, SyncLog
 from backend.modules.integration.client import BlingApiClient
 from backend.modules.integration.errors import ApiError
 from backend.modules.integration.sync_repository import ISyncLogRepository, SyncDataRepository
+
+if TYPE_CHECKING:
+    from backend.modules.integration.schemas import SyncStatusResponse
 
 TokenProvider = Callable[[], Awaitable[str]]
 
@@ -298,6 +303,31 @@ class BlingSyncService:
         if "missing nome" in lower:
             return "missing_nome"
         return "other"
+
+    async def get_sync_status(self) -> SyncStatusResponse:
+        from sqlalchemy import func, select
+
+        from backend.database.models.order import Order, OrderItem
+        from backend.database.models.product import Product
+
+        session = self._data_repo.session
+        products_count = (await session.execute(select(func.count(Product.id)))).scalar() or 0
+        orders_count = (await session.execute(select(func.count(Order.id)))).scalar() or 0
+        order_items_count = (await session.execute(select(func.count(OrderItem.id)))).scalar() or 0
+        orders_without_items = await self._data_repo.count_orders_without_items()
+        orders_without_channel = (
+            await session.execute(
+                select(func.count(Order.id)).where(Order.channel_id.is_(None))
+            )
+        ).scalar() or 0
+
+        return SyncStatusResponse(
+            products_count=products_count,
+            orders_count=orders_count,
+            order_items_count=order_items_count,
+            orders_without_items=orders_without_items,
+            orders_without_channel=orders_without_channel,
+        )
 
     async def sync_marketplaces(self, agrupador: int = 3) -> SyncResult:
         return await self._run_sync(
