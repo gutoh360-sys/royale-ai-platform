@@ -1,122 +1,189 @@
-# Task 2: Backend — Add period filtering to analytics repository
+# Task 2: Simplify Dashboard
 
 **Files:**
-- Modify: `backend/modules/analytics/repository.py`
-- Test: `backend/tests/unit/modules/analytics/test_analytics.py`
+- Modify: `frontend/src/features/dashboard/components/dashboard-page.tsx`
 
-**Interfaces:**
-- Consumes: `Period`, `period_to_range` from Task 1 (already implemented at `backend/core/period.py`)
-- Produces: Repository methods accept `start: datetime, end: datetime` params
+**Goal:** Dashboard answers "Como está minha operação?" with clear hierarchy:
+1. Title + period selector (already in dashboard-header.tsx)
+2. KPIs: Receita, Pedidos, Ticket Médio, Produtos sem estoque, Canal Líder
+3. Performance por marketplace (top 5)
+4. Alertas operacionais (top 5 recommendations)
 
-**Steps:**
+- [ ] **Step 1: Rewrite dashboard-page.tsx**
 
-1. Write failing tests for time-filtered metrics
-2. Run tests to verify they fail
-3. Add period-filtered methods to repository
-4. Run tests to verify they pass
-5. Commit
+Replace the content of `frontend/src/features/dashboard/components/dashboard-page.tsx` with a simplified version that:
 
-**Test code to add to `backend/tests/unit/modules/analytics/test_analytics.py`:**
+1. Keeps the period state and hooks (useExecutiveCommandCenter, useMarketplaceData, useProductsData, useSalesData)
+2. Removes: ExecutiveSummary, ExecutiveHealthSummary, ExecutiveModuleCard, ExecutiveActionList imports
+3. Adds 5 KPI cards in a grid: Receita, Pedidos, Ticket Médio, Sem Estoque, Canal Líder
+4. Adds "Performance por Marketplace" section showing top 5 marketplaces by revenue
+5. Adds "Alertas Operacionais" section showing top 5 recommendations by priority
+6. Keeps DashboardLayout and DashboardFooter
 
-```python
-from datetime import timedelta
-from backend.core.period import period_to_range, BUSINESS_TZ
+The simplified page should be clean, focused, and answer one question: "How is my operation?"
 
-async def test_dashboard_filters_by_period(db_session: AsyncSession) -> None:
-    """Orders outside the period window must NOT count toward summary metrics."""
-    now = datetime.now(BUSINESS_TZ)
+Here is the exact code to write:
 
-    # Inside 7d window
-    await _order(db_session, external_id="1", status="completed", total_amount=100.0,
-                 ordered_at=now - timedelta(days=2))
-    await _order(db_session, external_id="2", status="completed", total_amount=50.0,
-                 ordered_at=now - timedelta(days=5))
+```tsx
+"use client";
 
-    # Outside 7d window (10 days ago)
-    await _order(db_session, external_id="3", status="completed", total_amount=999.0,
-                 ordered_at=now - timedelta(days=10))
+import { useState } from "react";
+import { DashboardLayout } from "./dashboard-layout";
+import { DashboardFooter } from "./dashboard-footer";
+import { Card, CardContent } from "@/components/ui/card";
+import { useExecutiveCommandCenter } from "@/features/dashboard/executive-command-center/hooks/use-executive-command-center";
+import { useMarketplaceData } from "@/features/marketplace/hooks/use-marketplace-data";
+import { useProductsData } from "@/features/products-executive/hooks/use-products-data";
+import { ExecutiveRecommendation } from "@/features/dashboard/executive-command-center/components/executive-recommendation";
+import type { Period } from "@/lib/period";
 
-    await db_session.flush()
+export function DashboardPage() {
+  const [period, setPeriod] = useState<Period>("7d");
 
-    repo = AnalyticsRepository(db_session)
-    start, end = period_to_range("7d", BUSINESS_TZ)
+  const { data: cc, status: ccStatus } = useExecutiveCommandCenter(period);
+  const { summary: mpSummary, marketplaces, status: mpStatus } = useMarketplaceData(period);
+  const { summary: prSummary, status: prStatus } = useProductsData();
 
-    total = await repo.count_orders_in_period(start, end)
-    completed = await repo.count_completed_orders_in_period(start, end)
-    rev = await repo.revenue_in_period(start, end)
-    statuses = await repo.orders_by_status_in_period(start, end)
+  const isLoading = ccStatus === "loading";
 
-    assert total == 2
-    assert completed == 2
-    assert rev == 150.0
-    assert statuses == {"completed": 2}
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <p className="text-sm text-muted-foreground">Carregando...</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
-async def test_dashboard_zero_when_no_orders_in_period(db_session: AsyncSession) -> None:
-    now = datetime.now(BUSINESS_TZ)
-    await _order(db_session, external_id="1", status="completed", total_amount=100.0,
-                 ordered_at=now - timedelta(days=60))
-    await db_session.flush()
+  if (ccStatus === "error") {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <p className="text-sm text-destructive">Erro ao carregar dados</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
-    repo = AnalyticsRepository(db_session)
-    start, end = period_to_range("7d", BUSINESS_TZ)
+  const revenue = mpStatus === "success" ? mpSummary.totalRevenue : "R$ 0";
+  const totalOrders = mpStatus === "success" ? mpSummary.formattedTotalOrders : "0";
+  const ticket = mpStatus === "success" ? mpSummary.averageTicket : "R$ 0";
+  const outOfStock = prStatus === "success" ? prSummary.outOfStockProducts : 0;
+  const leader = mpStatus === "success" ? mpSummary.leaderName : "—";
 
-    assert await repo.count_orders_in_period(start, end) == 0
-    assert await repo.revenue_in_period(start, end) == 0.0
+  const recs = cc.recommendations;
+  const recsByPriority = [...recs].sort((a, b) => {
+    const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    return order[a.priority] - order[b.priority];
+  });
 
-async def test_dashboard_12m_window(db_session: AsyncSession) -> None:
-    now = datetime.now(BUSINESS_TZ)
-    await _order(db_session, external_id="1", status="completed", total_amount=200.0,
-                 ordered_at=now - timedelta(days=365))
-    await _order(db_session, external_id="2", status="completed", total_amount=100.0,
-                 ordered_at=now - timedelta(days=366))
-    await db_session.flush()
+  const topMarketplaces = mpStatus === "success"
+    ? marketplaces
+        .sort((a, b) => (b.totalRevenue ?? 0) - (a.totalRevenue ?? 0))
+        .slice(0, 5)
+    : [];
 
-    repo = AnalyticsRepository(db_session)
-    start, end = period_to_range("12m", BUSINESS_TZ)
-    total = await repo.count_orders_in_period(start, end)
-    assert total == 1
+  return (
+    <DashboardLayout period={period} onPeriodChange={setPeriod}>
+      <div className="flex flex-col gap-8">
+        <section aria-label="Indicadores principais">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
+            Visão Geral
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Receita</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">{revenue}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Pedidos</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">{totalOrders}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Ticket Médio</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">{ticket}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Sem Estoque</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">{outOfStock}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Canal Líder</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">{leader}</p>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        {topMarketplaces.length > 0 && (
+          <section aria-label="Performance por marketplace">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
+              Performance por Marketplace
+            </h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {topMarketplaces.map((mp) => (
+                <Card key={mp.id}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{mp.name}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {mp.formattedOrders} pedidos
+                        </p>
+                      </div>
+                      <p className="font-heading text-sm font-semibold">{mp.formattedRevenue}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {recsByPriority.length > 0 && (
+          <section aria-label="Alertas operacionais">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
+              Alertas Operacionais
+            </h2>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex flex-col gap-3">
+                  {recsByPriority.slice(0, 5).map((rec) => (
+                    <ExecutiveRecommendation key={rec.id} recommendation={rec} />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        )}
+      </div>
+
+      <DashboardFooter />
+    </DashboardLayout>
+  );
+}
 ```
 
-**Implementation code to add to `AnalyticsRepository` in `backend/modules/analytics/repository.py`:**
+- [ ] **Step 2: Run tests**
 
-```python
-async def count_orders_in_period(self, start: datetime, end: datetime) -> int:
-    stmt = select(func.count(Order.id)).where(
-        Order.ordered_at >= start, Order.ordered_at < end
-    )
-    result = await self._session.execute(stmt)
-    return int(result.scalar_one())
-
-async def count_completed_orders_in_period(self, start: datetime, end: datetime) -> int:
-    stmt = select(func.count(Order.id)).where(
-        Order.status == "completed",
-        Order.ordered_at >= start, Order.ordered_at < end,
-    )
-    result = await self._session.execute(stmt)
-    return int(result.scalar_one())
-
-async def revenue_in_period(self, start: datetime, end: datetime) -> float:
-    stmt = select(func.coalesce(func.sum(Order.total_amount), 0)).where(
-        Order.status == "completed",
-        Order.ordered_at >= start, Order.ordered_at < end,
-    )
-    result = await self._session.execute(stmt)
-    return float(result.scalar_one())
-
-async def orders_by_status_in_period(self, start: datetime, end: datetime) -> dict[str, int]:
-    stmt = select(Order.status, func.count(Order.id)).where(
-        Order.ordered_at >= start, Order.ordered_at < end
-    ).group_by(Order.status)
-    result = await self._session.execute(stmt)
-    return {status: int(count) for status, count in result.all()}
+```bash
+cd frontend && npx vitest run
 ```
+Expected: ALL PASS
 
-**Existing code context:**
-- The `_order` helper in test_analytics.py currently uses `ordered_at=datetime.now(UTC)`. You need to update it to accept an `ordered_at` parameter so tests can control the date.
-- The existing `_order` function is at line 43-62 of `backend/tests/unit/modules/analytics/test_analytics.py`
-- The existing `AnalyticsRepository` is at `backend/modules/analytics/repository.py`
-- The existing test conftest with `db_session` fixture is at `backend/tests/unit/modules/analytics/conftest.py`
+- [ ] **Step 3: Commit**
 
-**Work from:** `C:\Users\gutod\Documents\royale-platform`
-
-**Report file:** `C:\Users\gutod\Documents\royale-platform\.superpowers\sdd\task-2-report.md`
+```bash
+git add frontend/src/features/dashboard/
+git commit -m "refactor(dashboard): simplify to 5 KPIs + marketplace perf + alerts"
+```

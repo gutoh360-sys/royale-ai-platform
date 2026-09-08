@@ -1,55 +1,29 @@
-# Task 1 Report: Backend — Canonical period helper
+# Task 1: Reorganize Navigation — Report
 
 **Status:** DONE
 
-## Summary
+**Commit:** `5828dbf` — `refactor(nav): simplify sidebar to 5 working features`
 
-Implemented the canonical period helper module that parses period strings (today, 7d, 30d, 90d, 12m) and converts them to timezone-aware datetime ranges with start-inclusive, end-exclusive semantics.
+**Tests:** 735 passed, 0 failed
 
-## Files Created/Modified
+## Changes Made
 
-- `backend/core/period.py` — New module with `parse_period()` and `period_to_range()`
-- `backend/tests/unit/test_period.py` — 8 unit tests covering all period types and edge cases
+### `frontend/src/features/navigation/config.ts`
+- Removed 6 unused icon imports (`Wallet`, `ShoppingCart`, `Bot`, `BarChart3`, `Settings`)
+- Added `section?: "main" | "secondary"` to `NavItem` interface
+- Reduced `NAV_ITEMS` from 11 to exactly 5 items: Dashboard, Marketplace, Produtos, Estoque, Integrações
+- Renamed "Sync Bling" → "Integrações" for clearer UX
+- All items marked with `section: "main"`
 
-## Implementation Details
+### `frontend/src/features/navigation/components/navigation-sidebar.tsx`
+- Added section filter: `if (item.section && item.section !== "main") return false`
+- Permission-based filtering preserved unchanged
 
-- `Period` type: Literal type for type-safe period strings
-- `VALID_PERIODS`: Set of valid period values for fast lookup
-- `BUSINESS_TZ`: Default timezone (America/Sao_Paulo)
-- `parse_period(value: str) -> Period`: Validates and returns period string
-- `period_to_range(period: Period, tz: ZoneInfo) -> tuple[datetime, datetime]`: Returns (start, end) datetime tuple
+### `frontend/src/app/(authenticated)/admin/integrations/bling/sync-central-state.test.ts`
+- Updated 2 tests to reference new label "Integrações" instead of "Sync Bling"
 
-## Test Results
-
-All 8 tests passing:
-- `test_parse_period_valid` — Validates all 5 valid periods
-- `test_parse_period_invalid` — Validates ValueError for invalid periods
-- `test_period_today_range` — Today range validation
-- `test_period_7d_range` — 7-day range validation
-- `test_period_30d_range` — 30-day range validation
-- `test_period_90d_range` — 90-day range validation
-- `test_period_12m_range` — 12-month range validation
-- `test_start_inclusive_end_exclusive` — Timezone info validation
-
-## Verification
-
-- All 8 tests passing
-- Ruff linting: 0 errors
-- Mypy type checking: 0 issues
-
-## Self-Review Checklist
-
-- [x] Fully implemented everything in the spec
-- [x] Tests comprehensive (8 tests covering all periods and edge cases)
-- [x] Code clean and maintainable
-- [x] Followed existing project conventions
-- [x] No overbuilding
-- [x] Committed with descriptive message
-
-## Commit
-
-- `3bd7f8c` feat(backend): add canonical period helper module
-
-## Concerns
-
-None. Implementation matches the spec exactly and follows TDD approach as requested.
+## Constraints Respected
+- ✅ No routes or page files deleted
+- ✅ No business rules, database, or sync logic altered
+- ✅ Dark theme preserved (no CSS changes)
+- ✅ All existing tests pass (735/735)

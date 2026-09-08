@@ -19,5 +19,5 @@
 | 10. Growth calculation | ✅ done | 8bb129c | Approved |
 | 11. Backend temporal tests | ✅ done | 8a4140e | Approved |
 | 12. Frontend period tests | ✅ done | 140e435 | Approved |
-| 13. Hardcode sweep | pending | | |
-| 14. Final validation + commit | pending | | |
+| 13. Hardcode sweep | ✅ done | a672c54 | Approved |
+| 14. Final validation + commit | ✅ done | a672c54 | Approved |

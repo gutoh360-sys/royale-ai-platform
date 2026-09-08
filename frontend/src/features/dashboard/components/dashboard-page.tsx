@@ -53,7 +53,7 @@ export function DashboardPage() {
 
   const topMarketplaces = mpStatus === "success"
     ? marketplaces
-        .sort((a, b) => (b.totalRevenue ?? 0) - (a.totalRevenue ?? 0))
+        .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
         .slice(0, 5)
     : [];
 

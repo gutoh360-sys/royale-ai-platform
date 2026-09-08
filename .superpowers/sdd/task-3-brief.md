@@ -1,106 +1,163 @@
-# Task 3: Backend — Wire period into analytics service and router
+# Task 3: Simplify Inventory Page
 
 **Files:**
-- Modify: `backend/modules/analytics/service.py`
-- Modify: `backend/modules/analytics/router.py`
-- Modify: `backend/modules/analytics/schemas.py` (add `period` field to response)
-- Test: `backend/tests/unit/modules/analytics/test_analytics.py`
+- Modify: `frontend/src/features/inventory-executive/components/inventory-detail-page.tsx`
 
-**Interfaces:**
-- Consumes: Period-filtered repository methods from Task 2
-- Produces: `GET /analytics/dashboard?period=7d` returns time-filtered summary
+**Goal:** Inventory answers "O que precisa de atenção?" with:
+1. KPIs: Estoque Total, Sem Estoque, Itens Críticos, Capital Imobilizado
+2. Tabela de atenção (placeholder for now — shows message about items without turnover)
 
-**Steps:**
+- [ ] **Step 1: Rewrite inventory-detail-page.tsx**
 
-1. Write failing test
-2. Run test to verify it fails
-3. Update service to use period
-4. Update schemas to include period
-5. Update router to accept period param
-6. Run all analytics tests
-7. Commit
+Replace the content of `frontend/src/features/inventory-executive/components/inventory-detail-page.tsx` with:
 
-**Test code to add:**
+```tsx
+"use client";
 
-```python
-async def test_service_dashboard_uses_period(db_session: AsyncSession) -> None:
-    now = datetime.now(BUSINESS_TZ)
-    await _order(db_session, external_id="1", status="completed", total_amount=100.0,
-                 ordered_at=now - timedelta(days=2))
-    await _order(db_session, external_id="2", status="completed", total_amount=500.0,
-                 ordered_at=now - timedelta(days=40))
-    await db_session.flush()
+import { AlertCircle, Package } from "lucide-react";
+import { ContentContainer } from "@/components/shell/content-container";
+import { Card, CardContent } from "@/components/ui/card";
+import { InventoryDetailHeader } from "./inventory-detail-header";
+import { InventoryDetailSkeleton } from "./inventory-detail-skeleton";
+import { useInventoryData } from "@/features/inventory-executive/hooks/use-inventory-data";
 
-    service = AnalyticsService(AnalyticsRepository(db_session))
-    dashboard = await service.get_dashboard(period="7d")
+export function InventoryDetailPage() {
+  const { inventory, status } = useInventoryData();
 
-    assert dashboard.total_orders == 1
-    assert dashboard.revenue == Decimal("100.0")
-    assert dashboard.average_ticket == Decimal("100.0")
-    assert dashboard.period == "7d"
+  if (status === "loading") {
+    return (
+      <ContentContainer>
+        <InventoryDetailSkeleton />
+      </ContentContainer>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <ContentContainer>
+        <div className="flex items-center justify-center gap-2 min-h-[400px]">
+          <AlertCircle className="size-5 text-destructive" />
+          <p className="text-sm text-muted-foreground">Erro ao carregar dados de estoque</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
+  if (!inventory) {
+    return (
+      <ContentContainer>
+        <div className="flex items-center justify-center gap-2 min-h-[400px]">
+          <AlertCircle className="size-5 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Nenhum dado de estoque encontrado</p>
+        </div>
+      </ContentContainer>
+    );
+  }
+
+  return (
+    <ContentContainer>
+      <div className="animate-in fade-in duration-300 space-y-8">
+        <InventoryDetailHeader inventory={inventory} />
+
+        <section aria-label="Indicadores de estoque">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
+            Indicadores
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Estoque Total</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">
+                  {inventory.formattedItemsInStock}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Sem Estoque</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">
+                  {inventory.formattedItemsWithoutTurnover}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Itens Críticos</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">
+                  {inventory.formattedCriticalItems}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-muted-foreground">Capital Imobilizado</p>
+                <p className="font-heading text-lg font-semibold tracking-tight">
+                  {inventory.formattedImmobilizedCapital}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        <section aria-label="Produtos que precisam de atenção">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
+            Atenção
+          </h2>
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border/50">
+                      <th className="text-left px-4 py-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">SKU</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Produto</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Estoque</th>
+                      <th className="text-left px-4 py-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventory.itemsWithoutTurnover > 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                          {inventory.formattedItemsWithoutTurnover} produto(s) sem giro detectados
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                          <Package className="size-4 mx-auto mb-2 text-muted-foreground" />
+                          Nenhum produto com problema de estoque
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <footer className="border-t border-border/50 pt-4">
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
+            <span>Última atualização: {new Date(inventory.lastUpdate).toLocaleString("pt-BR")}</span>
+          </div>
+        </footer>
+      </div>
+    </ContentContainer>
+  );
+}
 ```
 
-**Service changes (`backend/modules/analytics/service.py`):**
+- [ ] **Step 2: Run tests**
 
-```python
-from backend.core.period import parse_period, period_to_range, BUSINESS_TZ
-
-class AnalyticsService:
-    def __init__(self, repository: AnalyticsRepository) -> None:
-        self._repository = repository
-
-    async def get_dashboard(self, period: str = "30d") -> AnalyticsDashboardResponse:
-        parsed = parse_period(period)
-        start, end = period_to_range(parsed, BUSINESS_TZ)
-
-        total_orders = await self._repository.count_orders_in_period(start, end)
-        completed_orders = await self._repository.count_completed_orders_in_period(start, end)
-        revenue = Decimal(str(await self._repository.revenue_in_period(start, end)))
-        average_ticket = round(revenue / completed_orders, 2) if completed_orders else None
-
-        sales_by_period = [
-            SalesByPeriodResponse(day=day, total_orders=count, revenue=Decimal(str(total)))
-            for day, count, total in await self._repository.sales_by_period(
-                start.date(), end.date() - timedelta(days=1)
-            )
-        ]
-
-        return AnalyticsDashboardResponse(
-            total_products=await self._repository.count_products(),
-            active_products=await self._repository.count_active_products(),
-            products_without_stock=await self._repository.count_products_without_stock(),
-            total_stock=await self._repository.sum_stock(),
-            total_orders=total_orders,
-            orders_by_status=await self._repository.orders_by_status_in_period(start, end),
-            revenue=revenue,
-            average_ticket=average_ticket,
-            sales_by_period=sales_by_period,
-            period=period,
-        )
+```bash
+cd frontend && npx vitest run
 ```
+Expected: ALL PASS
 
-**Schema changes (`backend/modules/analytics/schemas.py`):**
+- [ ] **Step 3: Commit**
 
-Add `period: str` field to `AnalyticsDashboardResponse`.
-
-**Router changes (`backend/modules/analytics/router.py`):**
-
-```python
-from backend.core.period import VALID_PERIODS
-
-@router.get("/dashboard", response_model=AnalyticsDashboardResponse, ...)
-async def get_dashboard(
-    period: str = Query(default="30d"),
-    days: int | None = Query(default=None, deprecated=True),
-    service: AnalyticsService = Depends(get_analytics_service),
-) -> AnalyticsDashboardResponse:
-    # Legacy compat: convert days to period if provided
-    if days is not None and period == "30d":
-        period_map = {1: "today", 7: "7d", 30: "30d"}
-        period = period_map.get(days, "30d")
-    return await service.get_dashboard(period=period)
+```bash
+git add frontend/src/features/inventory-executive/
+git commit -m "refactor(inventory): simplify to 4 KPIs + attention table"
 ```
-
-**Work from:** `C:\Users\gutod\Documents\royale-platform`
-
-**Report file:** `C:\Users\gutod\Documents\royale-platform\.superpowers\sdd\task-3-report.md`

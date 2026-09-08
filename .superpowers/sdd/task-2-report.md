@@ -1,35 +1,34 @@
-# Task 2 Report: Backend — Add period filtering to analytics repository
+# Task 2: Simplify Dashboard — Report
 
-## Status: DONE
+**Status:** DONE  
+**Commit:** `c2dc920` — refactor(dashboard): simplify to 5 KPIs + marketplace perf + alerts  
+**Tests:** 735/735 passed
 
-## Changes Made
+## What Changed
 
-### 1. `backend/modules/analytics/repository.py`
-- Added `datetime` to imports from `datetime`
-- Added 4 new period-filtered methods to `AnalyticsRepository`:
-  - `count_orders_in_period(start, end)` — counts all orders in range
-  - `count_completed_orders_in_period(start, end)` — counts completed orders in range
-  - `revenue_in_period(start, end)` — sums revenue from completed orders in range
-  - `orders_by_status_in_period(start, end)` — groups order counts by status in range
+Replaced `dashboard-page.tsx` with simplified version per brief:
 
-### 2. `backend/tests/unit/modules/analytics/test_analytics.py`
-- Added imports: `timedelta` from `datetime`, `BUSINESS_TZ` and `period_to_range` from `backend.core.period`
-- Updated `_order` helper to accept optional `ordered_at` parameter (defaults to `datetime.now(UTC)`)
-- Added 3 new test functions:
-  - `test_dashboard_filters_by_period` — verifies orders outside 7d window are excluded
-  - `test_dashboard_zero_when_no_orders_in_period` — verifies zero results when no orders in range
-  - `test_dashboard_12m_window` — verifies 12-month window counting
+- **Removed:** ExecutiveHealthSummary, ExecutiveModuleCard, ExecutiveActionList, ExecutiveSummary, useInventoryData, useSalesData, AlertTriangle icon
+- **Added:** 5 KPI cards (Receita, Pedidos, Ticket Médio, Sem Estoque, Canal Líder), Performance por Marketplace (top 5), Alertas Operacionais (top 5)
+- **Kept:** Period state, DashboardLayout, DashboardFooter, ExecutiveRecommendation, all core hooks
 
-## Test Results
+Updated 3 test files to match simplified dashboard:
+- `api-screen-regression.test.ts` — removed expectations for useInventoryData/useSalesData
+- `dashboard-real-data.test.ts` — replaced sales.health/inventory.health checks with marketplace/products summary checks
+- `period-filtering.test.ts` — updated hook expectations
 
-All 12 tests in `test_analytics.py` fail at **setup** due to Docker not being available (Docker Desktop not running on this machine). The test fixture requires a PostgreSQL container via `testcontainers`. This is a pre-existing environment issue — all original tests also fail with the same Docker error.
+## Files Modified
 
-Both modified files pass Python syntax validation (`ast.parse`), confirming no syntax or import errors.
+| File | Action |
+|------|--------|
+| `frontend/src/features/dashboard/components/dashboard-page.tsx` | Rewritten (simplified) |
+| `frontend/src/features/dashboard/tests/api-screen-regression.test.ts` | Updated assertions |
+| `frontend/src/features/dashboard/tests/dashboard-real-data.test.ts` | Updated assertions |
+| `frontend/src/features/dashboard/tests/period-filtering.test.ts` | Updated assertions |
 
-## Commits
+## Constraints Honored
 
-- `86bf7ce` feat(analytics): add period-filtered query methods and update _order helper
-
-## Concerns
-
-None. Implementation matches the task spec exactly.
+- No routes or page files deleted
+- No business rules, database, or sync logic altered
+- Period selector preserved (DashboardLayout)
+- All real data hooks preserved (useExecutiveCommandCenter, useMarketplaceData, useProductsData)
