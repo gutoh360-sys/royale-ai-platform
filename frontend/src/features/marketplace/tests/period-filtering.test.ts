@@ -42,7 +42,7 @@ describe("Marketplace period filtering", () => {
   });
 
   it("services send period=X to the backend", () => {
-    expect(apiMarketplaceSource).toContain("`/orders?period=${period}`");
+    expect(apiMarketplaceSource).toContain("/analytics/marketplace-revenue");
     expect(apiMarketplaceSource).toContain("fetchMarketplaceData(period: Period");
     expect(apiMarketplaceSource).toContain("previousPeriod = getPreviousPeriod(period)");
   });

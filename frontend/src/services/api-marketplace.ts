@@ -3,6 +3,22 @@ import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
 import { type Period } from "@/lib/period";
 
+interface MarketplaceRevenueItem {
+  channel_id: string | null;
+  channel_name: string;
+  marketplace_slug: string;
+  total_orders: number;
+  total_revenue: number;
+  average_ticket: number;
+}
+
+interface MarketplaceRevenueResponse {
+  marketplaces: MarketplaceRevenueItem[];
+  total_orders: number;
+  total_revenue: number;
+  period: string;
+}
+
 function getPreviousPeriod(period: Period): Period {
   const map: Record<Period, Period> = {
     "today": "7d",
@@ -13,64 +29,57 @@ function getPreviousPeriod(period: Period): Period {
   };
   return map[period];
 }
-import type { Order, SalesChannel } from "@/types/api";
+
+import type { SalesChannel } from "@/types/api";
 import type { MarketplaceData, MarketplaceSummaryData, MarketplaceDataResult } from "@/features/marketplace/types";
-import { groupChannelsByMarketplace, resolveMarketplaceGroup } from "@/features/marketplace/utils/grouping";
+import { groupChannelsByMarketplace } from "@/features/marketplace/utils/grouping";
 
-function ordersForChannels(channels: SalesChannel[], orders: Order[]): Order[] {
-  const channelIds = new Set(channels.map((ch) => ch.id));
-  return orders.filter((order) => order.channel_id && channelIds.has(order.channel_id));
-}
-
-function mapGroupToMarketplace(
-  slug: string,
-  displayName: string,
+function mapItemToMarketplace(
+  item: MarketplaceRevenueItem,
   channels: SalesChannel[],
-  currentOrders: Order[],
-  previousOrders: Order[],
+  previousRevenue: number,
+  previousOrders: number,
 ): MarketplaceData {
-  const allCurrentOrders = ordersForChannels(channels, currentOrders);
-  const allPreviousOrders = ordersForChannels(channels, previousOrders);
-  const currentRevenue = allCurrentOrders.reduce((sum, order) => sum + toNumber(order.total_amount), 0);
-  const previousRevenue = allPreviousOrders.reduce((sum, order) => sum + toNumber(order.total_amount), 0);
-  const total = allCurrentOrders.length;
-  const hasAttribution = total > 0;
-
-  const health = channels.every((ch) => ch.situacao === 0) ? 0 : 100;
-  const latestUpdate = channels
-    .map((ch) => ch.last_synced_at ?? ch.updated_at)
-    .sort()
-    .reverse()[0] ?? new Date().toISOString();
-
+  const currentRevenue = item.total_revenue;
+  const total = item.total_orders;
   const growth = previousRevenue === 0
     ? null
     : ((currentRevenue - previousRevenue) / previousRevenue) * 100;
 
+  const matchedChannels = channels.filter(
+    (ch) => ch.id === item.channel_id || ch.name?.toLowerCase() === item.channel_name.toLowerCase(),
+  );
+
   return {
-    id: slug,
-    slug,
-    name: displayName,
-    logo: displayName.charAt(0).toUpperCase(),
-    status: channels.every((ch) => ch.situacao === 0) ? "paused" : "connected",
-    revenue: hasAttribution ? currentRevenue : 0,
-    formattedRevenue: hasAttribution ? formatCurrency(currentRevenue) : "—",
-    orders: hasAttribution ? total : 0,
-    formattedOrders: hasAttribution ? String(total) : "—",
-    averageTicket: hasAttribution && total > 0 ? currentRevenue / total : 0,
-    formattedAverageTicket: hasAttribution && total > 0 ? formatCurrency(currentRevenue / total) : "—",
+    id: item.marketplace_slug,
+    slug: item.marketplace_slug,
+    name: item.channel_name,
+    logo: item.channel_name.charAt(0).toUpperCase(),
+    status: matchedChannels.length > 0
+      ? (matchedChannels.every((ch) => ch.situacao === 0) ? "paused" : "connected")
+      : "connected",
+    revenue: currentRevenue,
+    formattedRevenue: formatCurrency(currentRevenue),
+    orders: total,
+    formattedOrders: String(total),
+    averageTicket: total > 0 ? currentRevenue / total : 0,
+    formattedAverageTicket: total > 0 ? formatCurrency(currentRevenue / total) : "—",
     growth,
     marketShare: 0,
     formattedMarketShare: "—",
-    health,
-    lastUpdate: latestUpdate,
-    channels,
-    channelCount: channels.length,
+    health: 100,
+    lastUpdate: matchedChannels[0]?.last_synced_at ?? matchedChannels[0]?.updated_at ?? new Date().toISOString(),
+    channels: matchedChannels,
+    channelCount: matchedChannels.length,
   };
 }
 
-function buildSummary(orders: Order[], marketplaces: MarketplaceData[]): MarketplaceSummaryData {
-  const totalRevenue = orders.reduce((s, o) => s + toNumber(o.total_amount), 0);
-  const totalOrders = orders.length;
+function buildSummaryFromRevenue(
+  items: MarketplaceRevenueItem[],
+  totalOrders: number,
+  totalRevenue: number,
+  marketplaces: MarketplaceData[],
+): MarketplaceSummaryData {
   const withOrders = marketplaces.filter((m) => m.orders > 0);
   const leader = [...withOrders].sort((a, b) => b.revenue - a.revenue)[0];
   const withGrowth = marketplaces.filter((m) => m.growth !== null);
@@ -91,13 +100,13 @@ function buildSummary(orders: Order[], marketplaces: MarketplaceData[]): Marketp
 export async function fetchMarketplaceData(period: Period = "30d"): Promise<MarketplaceDataResult> {
   try {
     const previousPeriod = getPreviousPeriod(period);
-    const [channels, currentOrders, previousOrders] = await Promise.all([
+    const [channels, currentRevenueData, previousRevenueData] = await Promise.all([
       api.get<SalesChannel[]>("/sales-channels"),
-      api.get<Order[]>(`/orders?period=${period}`),
-      api.get<Order[]>(`/orders?period=${previousPeriod}`),
+      api.get<MarketplaceRevenueResponse>(`/analytics/marketplace-revenue?period=${period}`),
+      api.get<MarketplaceRevenueResponse>(`/analytics/marketplace-revenue?period=${previousPeriod}`),
     ]);
 
-    if (channels.length === 0) {
+    if (channels.length === 0 && currentRevenueData.marketplaces.length === 0) {
       return {
         marketplaces: [],
         summary: {
@@ -115,14 +124,23 @@ export async function fetchMarketplaceData(period: Period = "30d"): Promise<Mark
       };
     }
 
-    const groups = groupChannelsByMarketplace(channels);
-    const marketplaces = Array.from(groups.entries()).map(([slug, group]) =>
-      mapGroupToMarketplace(slug, group.displayName, group.channels, currentOrders, previousOrders),
+    const previousRevMap = new Map(
+      previousRevenueData.marketplaces.map((p) => [p.marketplace_slug, { revenue: p.total_revenue, orders: p.total_orders }]),
     );
+
+    const marketplaces = currentRevenueData.marketplaces.map((item) => {
+      const prev = previousRevMap.get(item.marketplace_slug);
+      return mapItemToMarketplace(item, channels, prev?.revenue ?? 0, prev?.orders ?? 0);
+    });
 
     return {
       marketplaces,
-      summary: buildSummary(currentOrders, marketplaces),
+      summary: buildSummaryFromRevenue(
+        currentRevenueData.marketplaces,
+        currentRevenueData.total_orders,
+        currentRevenueData.total_revenue,
+        marketplaces,
+      ),
       status: "success",
       error: null,
     };
@@ -145,4 +163,4 @@ export async function fetchMarketplaceData(period: Period = "30d"): Promise<Mark
   }
 }
 
-export { resolveMarketplaceGroup, groupChannelsByMarketplace };
+export { groupChannelsByMarketplace };

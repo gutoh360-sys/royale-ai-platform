@@ -154,3 +154,35 @@ class AnalyticsRepository:
         ).group_by(Order.status)
         result = await self._session.execute(stmt)
         return {status: int(count) for status, count in result.all()}
+
+    async def marketplace_revenue_in_period(
+        self, start: datetime, end: datetime
+    ) -> list[dict]:
+        from backend.database.models.sales_channel import SalesChannel
+
+        order_count = func.count(Order.id)
+        total_amount = func.coalesce(func.sum(Order.total_amount), 0)
+
+        stmt = (
+            select(
+                Order.channel_id,
+                order_count.label("order_count"),
+                total_amount.label("total_amount"),
+            )
+            .where(
+                Order.status == "completed",
+                Order.ordered_at >= start,
+                Order.ordered_at < end,
+            )
+            .group_by(Order.channel_id)
+            .order_by(order_count.desc())
+        )
+        result = await self._session.execute(stmt)
+        return [
+            {
+                "channel_id": row.channel_id,
+                "order_count": int(row.order_count),
+                "total_amount": float(row.total_amount),
+            }
+            for row in result.all()
+        ]

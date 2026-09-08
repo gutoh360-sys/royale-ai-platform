@@ -38,6 +38,22 @@ class ProductPerformanceItem(BaseModel):
     order_count: int
 
 
+class MarketplaceRevenueItem(BaseModel):
+    channel_id: str | None
+    channel_name: str
+    marketplace_slug: str
+    total_orders: int
+    total_revenue: float
+    average_ticket: float
+
+
+class MarketplaceRevenueResponse(BaseModel):
+    marketplaces: list[MarketplaceRevenueItem]
+    total_orders: int
+    total_revenue: float
+    period: str
+
+
 class ProductAnalyticsResponse(BaseModel):
     products: list[ProductPerformanceItem]
     total_products: int

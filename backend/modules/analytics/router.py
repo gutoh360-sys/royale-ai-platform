@@ -3,7 +3,11 @@ from fastapi import APIRouter, Depends, Query
 from backend.core.period import VALID_PERIODS
 from backend.core.security.deps import require_admin_auth
 from backend.modules.analytics.di import get_analytics_service
-from backend.modules.analytics.schemas import AnalyticsDashboardResponse, ProductAnalyticsResponse
+from backend.modules.analytics.schemas import (
+    AnalyticsDashboardResponse,
+    MarketplaceRevenueResponse,
+    ProductAnalyticsResponse,
+)
 from backend.modules.analytics.service import AnalyticsService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -34,3 +38,15 @@ async def get_product_analytics(
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> ProductAnalyticsResponse:
     return await service.get_product_analytics()
+
+
+@router.get(
+    "/marketplace-revenue",
+    response_model=MarketplaceRevenueResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def get_marketplace_revenue(
+    period: str = Query(default="30d"),
+    service: AnalyticsService = Depends(get_analytics_service),
+) -> MarketplaceRevenueResponse:
+    return await service.get_marketplace_revenue(period=period)

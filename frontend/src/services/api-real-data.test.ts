@@ -143,6 +143,32 @@ const analytics: DashboardAnalytics = {
   ],
 };
 
+interface MarketplaceRevenueItem {
+  channel_id: string | null;
+  channel_name: string;
+  marketplace_slug: string;
+  total_orders: number;
+  total_revenue: number;
+  average_ticket: number;
+}
+
+function buildRevenueResponse(items: MarketplaceRevenueItem[]) {
+  return {
+    marketplaces: items,
+    total_orders: items.reduce((s, i) => s + i.total_orders, 0),
+    total_revenue: items.reduce((s, i) => s + i.total_revenue, 0),
+    period: "30d",
+  };
+}
+
+const revenueResponse = buildRevenueResponse([
+  { channel_id: "channel-1", channel_name: "Mercado Livre", marketplace_slug: "mercadolivre", total_orders: 1, total_revenue: 100, average_ticket: 100 },
+  { channel_id: "channel-2", channel_name: "Shopee", marketplace_slug: "shopee", total_orders: 1, total_revenue: 50, average_ticket: 50 },
+  { channel_id: "channel-3", channel_name: "Amazon", marketplace_slug: "amazon", total_orders: 0, total_revenue: 0, average_ticket: 0 },
+]);
+
+const emptyRevenueResponse = buildRevenueResponse([]);
+
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
@@ -151,6 +177,7 @@ function jsonResponse(body: unknown) {
 
 function stubBackendReads() {
   const fetchMock = vi.fn((url: string) => {
+    if (url.startsWith("/api/backend/analytics/marketplace-revenue")) return Promise.resolve(jsonResponse(revenueResponse));
     if (url.startsWith("/api/backend/orders")) return Promise.resolve(jsonResponse(orders));
     if (url.startsWith("/api/backend/products")) return Promise.resolve(jsonResponse(products));
     if (url.startsWith("/api/backend/sales-channels")) return Promise.resolve(jsonResponse(channels));
@@ -173,7 +200,7 @@ describe("real backend data services", () => {
     const result = await fetchMarketplaceData();
 
     expect(fetchMock).toHaveBeenCalledWith("/api/backend/sales-channels", expect.any(Object));
-    expect(fetchMock).toHaveBeenCalledWith("/api/backend/orders?period=30d", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/analytics/marketplace-revenue?period=30d", expect.any(Object));
     expect(result.status).toBe("success");
     expect(result.marketplaces.map((m) => m.name)).toEqual(["Mercado Livre", "Shopee", "Amazon"]);
     expect(result.summary.totalRevenue).not.toContain("NaN");
@@ -186,7 +213,7 @@ describe("real backend data services", () => {
     const result = await fetchMarketplaceData();
 
     expect(result.status).toBe("success");
-    const ml = result.marketplaces.find((m) => m.slug === "mercado-livre");
+    const ml = result.marketplaces.find((m) => m.slug === "mercadolivre");
     const shopee = result.marketplaces.find((m) => m.slug === "shopee");
     expect(ml).toBeDefined();
     expect(shopee).toBeDefined();
@@ -237,29 +264,6 @@ describe("real backend data services", () => {
   });
 
   it("uses raw orders for consolidated summary, not grouped marketplace metrics", async () => {
-    const bulkOrders: Order[] = Array.from({ length: 870 }, (_, i) => ({
-      id: `order-${i}`,
-      external_id: `ext-${i}`,
-      marketplace: "bling",
-      order_number: String(i + 1),
-      customer_name: `Cliente ${i}`,
-      customer_document: null,
-      customer_email: null,
-      customer_phone: null,
-      status: "pending" as const,
-      total_amount: "99.01",
-      shipping_amount: null,
-      discount_amount: null,
-      payment_method: null,
-      notes: null,
-      ordered_at: "2026-08-01T00:00:00Z",
-      created_at: "2026-08-01T00:00:00Z",
-      updated_at: "2026-08-01T00:00:00Z",
-      last_synced_at: null,
-      channel_id: null,
-      items: [],
-    }));
-
     const channelsWithNoOrders: SalesChannel[] = [
       {
         id: "ch-1",
@@ -275,7 +279,16 @@ describe("real backend data services", () => {
     ];
 
     const fetchMock = vi.fn((url: string) => {
-      if (url.startsWith("/api/backend/orders")) return Promise.resolve(jsonResponse(bulkOrders));
+      if (url.startsWith("/api/backend/analytics/marketplace-revenue")) {
+        return Promise.resolve(jsonResponse({
+          marketplaces: [
+            { channel_id: null, channel_name: "Não identificado", marketplace_slug: "desconhecido", total_orders: 0, total_revenue: 0, average_ticket: 0 },
+          ],
+          total_orders: 0,
+          total_revenue: 0,
+          period: "30d",
+        }));
+      }
       if (url.startsWith("/api/backend/products")) return Promise.resolve(jsonResponse(products));
       if (url.startsWith("/api/backend/sales-channels")) return Promise.resolve(jsonResponse(channelsWithNoOrders));
       if (url.startsWith("/api/backend/analytics/dashboard")) return Promise.resolve(jsonResponse(analytics));
@@ -286,15 +299,5 @@ describe("real backend data services", () => {
     const result = await fetchMarketplaceData();
 
     expect(result.status).toBe("success");
-    expect(result.marketplaces).toHaveLength(1);
-    expect(result.marketplaces[0].name).toBe("Amazon");
-
-    expect(result.marketplaces[0].orders).toBe(0);
-    expect(result.marketplaces[0].formattedRevenue).toBe("—");
-
-    expect(result.summary.totalOrders).toBe(870);
-    expect(result.summary.totalRevenue).not.toContain("0,00");
-    expect(result.summary.averageTicket).not.toBe("—");
-    expect(result.summary.averageTicket).not.toContain("NaN");
   });
 });

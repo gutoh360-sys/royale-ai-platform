@@ -4,6 +4,8 @@ from backend.core.period import BUSINESS_TZ, parse_period, period_to_range
 from backend.modules.analytics.repository import AnalyticsRepository
 from backend.modules.analytics.schemas import (
     AnalyticsDashboardResponse,
+    MarketplaceRevenueItem,
+    MarketplaceRevenueResponse,
     ProductAnalyticsResponse,
     ProductPerformanceItem,
     SalesByPeriodResponse,
@@ -84,4 +86,80 @@ class AnalyticsService:
             total_revenue=total_revenue,
             total_orders=total_orders,
             average_margin=average_margin,
+        )
+
+    async def get_marketplace_revenue(self, period: str = "30d") -> MarketplaceRevenueResponse:
+        parsed = parse_period(period)
+        start, end = period_to_range(parsed, BUSINESS_TZ)
+
+        raw_rows = await self._repository.marketplace_revenue_in_period(start, end)
+
+        marketplace_map = {
+            "mercadolivre": "Mercado Livre",
+            "mercadolivre mercado livre": "Mercado Livre",
+            "shopee": "Shopee",
+            "amazon": "Amazon",
+            "magalu": "Magazine Luiza",
+            "magazine luiza": "Magazine Luiza",
+            "americanas": "Americanas",
+            "casas bahia": "Casas Bahia",
+            "casasbahia": "Casas Bahia",
+            "aliexpress": "AliExpress",
+            "shein": "Shein",
+            "amazon seller": "Amazon",
+            "ml": "Mercado Livre",
+            "meli": "Mercado Livre",
+        }
+
+        slug_map = {
+            "Mercado Livre": "mercadolivre",
+            "Shopee": "shopee",
+            "Amazon": "amazon",
+            "Magazine Luiza": "magalu",
+            "Americanas": "americanas",
+            "Casas Bahia": "casasbahia",
+            "AliExpress": "aliexpress",
+            "Shein": "shein",
+        }
+
+        total_orders = 0
+        total_revenue = 0.0
+        marketplace_items: list[MarketplaceRevenueItem] = []
+
+        for row in raw_rows:
+            total_orders += row["order_count"]
+            total_revenue += row["total_amount"]
+
+            channel_name = "Não identificado"
+            marketplace_slug = "desconhecido"
+
+            if row["channel_id"]:
+                normalized = str(row["channel_id"]).lower().strip()
+                channel_name = marketplace_map.get(normalized, str(row["channel_id"]))
+                marketplace_slug = slug_map.get(channel_name, normalized)
+
+            ticket = (
+                round(row["total_amount"] / row["order_count"], 2)
+                if row["order_count"]
+                else 0.0
+            )
+
+            marketplace_items.append(
+                MarketplaceRevenueItem(
+                    channel_id=row["channel_id"],
+                    channel_name=channel_name,
+                    marketplace_slug=marketplace_slug,
+                    total_orders=row["order_count"],
+                    total_revenue=round(row["total_amount"], 2),
+                    average_ticket=ticket,
+                )
+            )
+
+        marketplace_items.sort(key=lambda x: x.total_revenue, reverse=True)
+
+        return MarketplaceRevenueResponse(
+            marketplaces=marketplace_items,
+            total_orders=total_orders,
+            total_revenue=round(total_revenue, 2),
+            period=period,
         )
