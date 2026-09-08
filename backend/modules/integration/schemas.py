@@ -101,3 +101,16 @@ class SyncStatusResponse(BaseModel):
     order_items_count: int
     orders_without_items: int
     orders_without_channel: int
+
+
+class CheckpointResponse(BaseModel):
+    entity: str
+    current_page: int
+    last_completed_page: int
+    status: str
+    totals: dict
+    started_at: datetime | None
+    updated_at: datetime
+    finished_at: datetime | None
+    error_message: str | None
+    created_at: datetime

@@ -20,6 +20,7 @@ from backend.modules.integration.sync_repository import (
     PostgresSyncLogRepository,
     SyncDataRepository,
 )
+from backend.modules.integration.checkpoint import CheckpointRepository
 from backend.modules.integration.sync_service import BlingSyncService
 
 _engine: AsyncEngine | None = None
@@ -125,3 +126,9 @@ async def get_bling_sync_service(
         data_repo=data_repo,
         settings=settings,
     )
+
+
+async def get_checkpoint_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> CheckpointRepository:
+    return CheckpointRepository(session)

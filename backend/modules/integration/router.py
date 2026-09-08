@@ -1,8 +1,12 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.core.security.deps import require_admin_auth
+from backend.modules.integration.checkpoint import CheckpointRepository
 from backend.modules.integration.di import (
     get_bling_sync_service,
+    get_checkpoint_repository,
     get_integration_connection_service,
 )
 from backend.modules.integration.errors import (
@@ -18,6 +22,7 @@ from backend.modules.integration.schemas import (
     BackfillOrdersRequest,
     BackfillOrdersResponse,
     CallbackResponse,
+    CheckpointResponse,
     ConnectionStatusResponse,
     ConnectionTestResponse,
     SyncProductsBatchRequest,
@@ -237,6 +242,7 @@ async def backfill_order_items(
 async def sync_products_batch(
     body: SyncProductsBatchRequest,
     service: BlingSyncService = Depends(get_bling_sync_service),
+    checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository),
 ) -> SyncProductsBatchResponse:
     if body.start_page < 1:
         raise HTTPException(
@@ -248,13 +254,58 @@ async def sync_products_batch(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="pages must be between 1 and 10",
         )
+
+    existing = await checkpoint_repo.get("products")
+    start_page = body.start_page
+    if existing and existing.status == "running" and start_page == 1:
+        start_page = existing.current_page
+
     try:
         result = await service.sync_products_batch(
-            start_page=body.start_page,
+            start_page=start_page,
             pages=body.pages,
         )
     except OAuthPermanentError as exc:
+        await checkpoint_repo.upsert(
+            "products",
+            status="failed",
+            error_message=str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    if result.natural_end:
+        await checkpoint_repo.upsert(
+            "products",
+            current_page=start_page,
+            last_completed_page=result.end_page,
+            status="completed",
+            totals={
+                "fetched": result.fetched,
+                "processed": result.processed,
+                "created": result.created,
+                "updated": result.updated,
+                "skipped": result.skipped,
+                "failed": result.failed,
+            },
+            finished_at=datetime.now(UTC),
+        )
+    else:
+        await checkpoint_repo.upsert(
+            "products",
+            current_page=result.next_page or start_page,
+            last_completed_page=result.end_page,
+            status="running",
+            totals={
+                "fetched": result.fetched,
+                "processed": result.processed,
+                "created": result.created,
+                "updated": result.updated,
+                "skipped": result.skipped,
+                "failed": result.failed,
+            },
+            started_at=existing.started_at if existing else datetime.now(UTC),
+        )
+
     return SyncProductsBatchResponse(
         start_page=result.start_page,
         end_page=result.end_page,
@@ -281,3 +332,32 @@ async def get_sync_status(
     service: BlingSyncService = Depends(get_bling_sync_service),
 ) -> SyncStatusResponse:
     return await service.get_sync_status()
+
+
+@router.get(
+    "/checkpoint/{entity}",
+    response_model=CheckpointResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def get_checkpoint(
+    entity: str,
+    repo: CheckpointRepository = Depends(get_checkpoint_repository),
+) -> CheckpointResponse:
+    checkpoint = await repo.get(entity)
+    if checkpoint is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No checkpoint found for entity '{entity}'",
+        )
+    return CheckpointResponse(
+        entity=checkpoint.entity,
+        current_page=checkpoint.current_page,
+        last_completed_page=checkpoint.last_completed_page,
+        status=checkpoint.status,
+        totals=checkpoint.totals or {},
+        started_at=checkpoint.started_at,
+        updated_at=checkpoint.updated_at,
+        finished_at=checkpoint.finished_at,
+        error_message=checkpoint.error_message,
+        created_at=checkpoint.created_at,
+    )
