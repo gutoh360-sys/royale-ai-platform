@@ -70,7 +70,7 @@ export interface SalesByPeriod {
   revenue: number | string;
 }
 
-export type AnalyticsPeriodDays = 1 | 7 | 30;
+export type AnalyticsPeriodDays = 1 | 7 | 30 | 90 | 365;
 
 export interface DashboardAnalytics {
   total_products: number;
@@ -82,6 +82,29 @@ export interface DashboardAnalytics {
   revenue: number | string;
   average_ticket: number | string | null;
   sales_by_period: SalesByPeriod[];
+}
+
+export interface ProductPerformanceItem {
+  id: string;
+  sku: string;
+  name: string;
+  brand: string | null;
+  category_id: string;
+  category_name: string;
+  price: number | string;
+  cost: number | string | null;
+  stock_quantity: number;
+  active: boolean;
+  total_revenue: number | string;
+  order_count: number;
+}
+
+export interface ProductAnalyticsResponse {
+  products: ProductPerformanceItem[];
+  total_products: number;
+  total_revenue: number | string;
+  total_orders: number;
+  average_margin: number | null;
 }
 
 export interface SalesChannel {
