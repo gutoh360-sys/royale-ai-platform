@@ -15,6 +15,7 @@ from backend.modules.integration.errors import (
     OAuthStateError,
     TokenRevocationError,
 )
+from backend.modules.integration.locks import SyncLock
 from backend.modules.integration.schemas import (
     AuthorizationUrlResponse,
     BackfillOrderItemsRequest,
@@ -25,6 +26,7 @@ from backend.modules.integration.schemas import (
     CheckpointResponse,
     ConnectionStatusResponse,
     ConnectionTestResponse,
+    LockStatusResponse,
     SyncProductsBatchRequest,
     SyncProductsBatchResponse,
     SyncStatusResponse,
@@ -143,10 +145,18 @@ async def trigger_sync(
                 "entity must be one of: products, orders, marketplaces, product_channels, listings"
             ),
         )
+    lock = SyncLock("sync")
+    if not await lock.acquire():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sincronização em andamento. Aguarde a conclusão.",
+        )
     try:
         result = await service.sync(entity=entity)
     except OAuthPermanentError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        await lock.release()
     return SyncTriggerResponse(
         entity=result.entity,
         sync_type=result.sync_type,
@@ -212,6 +222,13 @@ async def backfill_order_items(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="limit must be between 1 and 100",
         )
+
+    lock = SyncLock("sync")
+    if not await lock.acquire():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sincronização em andamento. Aguarde a conclusão.",
+        )
     try:
         result = await service.backfill_order_items(
             limit=body.limit,
@@ -219,6 +236,8 @@ async def backfill_order_items(
         )
     except OAuthPermanentError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        await lock.release()
     return BackfillOrderItemsResponse(
         selected=result.selected,
         processed=result.processed,
@@ -255,56 +274,66 @@ async def sync_products_batch(
             detail="pages must be between 1 and 10",
         )
 
-    existing = await checkpoint_repo.get("products")
-    start_page = body.start_page
-    if existing and existing.status == "running" and start_page == 1:
-        start_page = existing.current_page
+    lock = SyncLock("sync")
+    if not await lock.acquire():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sincronização em andamento. Aguarde a conclusão.",
+        )
 
     try:
-        result = await service.sync_products_batch(
-            start_page=start_page,
-            pages=body.pages,
-        )
-    except OAuthPermanentError as exc:
-        await checkpoint_repo.upsert(
-            "products",
-            status="failed",
-            error_message=str(exc),
-        )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        existing = await checkpoint_repo.get("products")
+        start_page = body.start_page
+        if existing and existing.status == "running" and start_page == 1:
+            start_page = existing.current_page
 
-    if result.natural_end:
-        await checkpoint_repo.upsert(
-            "products",
-            current_page=start_page,
-            last_completed_page=result.end_page,
-            status="completed",
-            totals={
-                "fetched": result.fetched,
-                "processed": result.processed,
-                "created": result.created,
-                "updated": result.updated,
-                "skipped": result.skipped,
-                "failed": result.failed,
-            },
-            finished_at=datetime.now(UTC),
-        )
-    else:
-        await checkpoint_repo.upsert(
-            "products",
-            current_page=result.next_page or start_page,
-            last_completed_page=result.end_page,
-            status="running",
-            totals={
-                "fetched": result.fetched,
-                "processed": result.processed,
-                "created": result.created,
-                "updated": result.updated,
-                "skipped": result.skipped,
-                "failed": result.failed,
-            },
-            started_at=existing.started_at if existing else datetime.now(UTC),
-        )
+        try:
+            result = await service.sync_products_batch(
+                start_page=start_page,
+                pages=body.pages,
+            )
+        except OAuthPermanentError as exc:
+            await checkpoint_repo.upsert(
+                "products",
+                status="failed",
+                error_message=str(exc),
+            )
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+        if result.natural_end:
+            await checkpoint_repo.upsert(
+                "products",
+                current_page=start_page,
+                last_completed_page=result.end_page,
+                status="completed",
+                totals={
+                    "fetched": result.fetched,
+                    "processed": result.processed,
+                    "created": result.created,
+                    "updated": result.updated,
+                    "skipped": result.skipped,
+                    "failed": result.failed,
+                },
+                finished_at=datetime.now(UTC),
+            )
+        else:
+            await checkpoint_repo.upsert(
+                "products",
+                current_page=result.next_page or start_page,
+                last_completed_page=result.end_page,
+                status="running",
+                totals={
+                    "fetched": result.fetched,
+                    "processed": result.processed,
+                    "created": result.created,
+                    "updated": result.updated,
+                    "skipped": result.skipped,
+                    "failed": result.failed,
+                },
+                started_at=existing.started_at if existing else datetime.now(UTC),
+            )
+    finally:
+        await lock.release()
 
     return SyncProductsBatchResponse(
         start_page=result.start_page,
@@ -332,6 +361,16 @@ async def get_sync_status(
     service: BlingSyncService = Depends(get_bling_sync_service),
 ) -> SyncStatusResponse:
     return await service.get_sync_status()
+
+
+@router.get(
+    "/lock-status",
+    response_model=LockStatusResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def get_lock_status() -> LockStatusResponse:
+    lock = SyncLock("sync")
+    return LockStatusResponse(locked=await lock.is_locked())
 
 
 @router.get(

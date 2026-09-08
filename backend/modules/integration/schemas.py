@@ -103,6 +103,10 @@ class SyncStatusResponse(BaseModel):
     orders_without_channel: int
 
 
+class LockStatusResponse(BaseModel):
+    locked: bool
+
+
 class CheckpointResponse(BaseModel):
     entity: str
     current_page: int
