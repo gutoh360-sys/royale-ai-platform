@@ -20,6 +20,7 @@ from backend.database.models.sales_channel import SalesChannel
 from backend.database.models.sync import SyncError, SyncLog
 from backend.modules.integration.client import BlingApiClient
 from backend.modules.integration.errors import ApiError
+from backend.modules.integration.checkpoint import CheckpointRepository
 from backend.modules.integration.sync_repository import ISyncLogRepository, SyncDataRepository
 
 if TYPE_CHECKING:
@@ -90,6 +91,35 @@ class BackfillResult:
     already_linked: int
     bling_not_found: int
     failed: int
+
+
+@dataclass(frozen=True)
+class SyncAllPhaseResult:
+    phase: str
+    status: str
+    items_processed: int = 0
+    items_created: int = 0
+    items_updated: int = 0
+    items_failed: int = 0
+    items_skipped: int = 0
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class SyncAllReconciliation:
+    products_count: int
+    orders_count: int
+    order_items_count: int
+    orders_without_items: int
+    orders_without_channel: int
+    zero_stock: int
+
+
+@dataclass(frozen=True)
+class SyncAllResult:
+    overall_status: str
+    phases: list[SyncAllPhaseResult]
+    reconciliation: SyncAllReconciliation
 
 
 @dataclass(frozen=True)
@@ -391,6 +421,110 @@ class BlingSyncService:
                     exc,
                 )
         return items
+
+    async def sync_all(self, checkpoint_repo: CheckpointRepository | None = None) -> SyncAllResult:
+        from sqlalchemy import func, select
+
+        from backend.database.models.order import Order, OrderItem
+        from backend.database.models.product import Product
+
+        phases: list[SyncAllPhaseResult] = []
+        overall_status = "completed"
+        session = self._data_repo.session
+
+        phase_defs = [
+            ("products", lambda: self.sync_products(sync_type="full")),
+            ("orders", lambda: self.sync_orders()),
+            ("channels", lambda: self.sync_marketplaces()),
+            ("order_items", lambda: self.backfill_order_items(limit=100)),
+        ]
+
+        for phase_name, phase_fn in phase_defs:
+            if checkpoint_repo is not None:
+                await checkpoint_repo.upsert(
+                    phase_name,
+                    status="running",
+                    started_at=self._now(),
+                )
+            try:
+                result = await phase_fn()
+                phase_result = SyncAllPhaseResult(
+                    phase=phase_name,
+                    status=result.status,
+                    items_processed=result.items_processed,
+                    items_created=result.items_created,
+                    items_updated=result.items_updated,
+                    items_failed=result.items_failed,
+                    items_skipped=result.items_skipped,
+                    error_message=result.error_message,
+                )
+            except Exception as exc:
+                _, error_message = self._safe_error_details(exc)
+                phase_result = SyncAllPhaseResult(
+                    phase=phase_name,
+                    status="failed",
+                    error_message=error_message,
+                )
+                overall_status = "partial"
+                self._log_failure_safely(
+                    f"bling_sync_all_{phase_name}_failed",
+                    entity=phase_name,
+                    cause=exc,
+                )
+
+            if checkpoint_repo is not None:
+                await checkpoint_repo.upsert(
+                    phase_name,
+                    status=phase_result.status,
+                    error_message=phase_result.error_message,
+                    finished_at=self._now(),
+                )
+            phases.append(phase_result)
+
+        try:
+            products_count = (
+                await session.execute(select(func.count(Product.id)))
+            ).scalar() or 0
+            orders_count = (
+                await session.execute(select(func.count(Order.id)))
+            ).scalar() or 0
+            order_items_count = (
+                await session.execute(select(func.count(OrderItem.id)))
+            ).scalar() or 0
+            orders_without_items = await self._data_repo.count_orders_without_items()
+            orders_without_channel = (
+                await session.execute(
+                    select(func.count(Order.id)).where(Order.channel_id.is_(None))
+                )
+            ).scalar() or 0
+            zero_stock = (
+                await session.execute(
+                    select(func.count(Product.id)).where(Product.stock_quantity == 0)
+                )
+            ).scalar() or 0
+        except Exception as exc:
+            self._log_failure_safely(
+                "bling_sync_all_reconciliation_failed",
+                entity="reconciliation",
+                cause=exc,
+            )
+            products_count = orders_count = order_items_count = 0
+            orders_without_items = orders_without_channel = zero_stock = 0
+
+        reconciliation = SyncAllReconciliation(
+            products_count=products_count,
+            orders_count=orders_count,
+            order_items_count=order_items_count,
+            orders_without_items=orders_without_items,
+            orders_without_channel=orders_without_channel,
+            zero_stock=zero_stock,
+        )
+
+        return SyncAllResult(
+            overall_status=overall_status,
+            phases=phases,
+            reconciliation=reconciliation,
+        )
 
     async def sync_orders(self) -> SyncResult:
         days_back = self._order_days_back or self._settings.BLING_ORDER_SYNC_DAYS_BACK

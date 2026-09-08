@@ -27,6 +27,9 @@ from backend.modules.integration.schemas import (
     ConnectionStatusResponse,
     ConnectionTestResponse,
     LockStatusResponse,
+    SyncAllPhaseResponse,
+    SyncAllReconciliationResponse,
+    SyncAllResponse,
     SyncProductsBatchRequest,
     SyncProductsBatchResponse,
     SyncStatusResponse,
@@ -167,6 +170,53 @@ async def trigger_sync(
         items_failed=result.items_failed,
         items_skipped=result.items_skipped,
         error_message=result.error_message,
+    )
+
+
+@router.post(
+    "/sync-all",
+    response_model=SyncAllResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def sync_all(
+    service: BlingSyncService = Depends(get_bling_sync_service),
+    checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository),
+) -> SyncAllResponse:
+    lock = SyncLock("all")
+    if not await lock.acquire():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sincronização em andamento. Aguarde a conclusão.",
+        )
+    try:
+        result = await service.sync_all(checkpoint_repo=checkpoint_repo)
+    except OAuthPermanentError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        await lock.release()
+    return SyncAllResponse(
+        overall_status=result.overall_status,
+        phases=[
+            SyncAllPhaseResponse(
+                phase=p.phase,
+                status=p.status,
+                items_processed=p.items_processed,
+                items_created=p.items_created,
+                items_updated=p.items_updated,
+                items_failed=p.items_failed,
+                items_skipped=p.items_skipped,
+                error_message=p.error_message,
+            )
+            for p in result.phases
+        ],
+        reconciliation=SyncAllReconciliationResponse(
+            products_count=result.reconciliation.products_count,
+            orders_count=result.reconciliation.orders_count,
+            order_items_count=result.reconciliation.order_items_count,
+            orders_without_items=result.reconciliation.orders_without_items,
+            orders_without_channel=result.reconciliation.orders_without_channel,
+            zero_stock=result.reconciliation.zero_stock,
+        ),
     )
 
 

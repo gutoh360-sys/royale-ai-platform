@@ -118,3 +118,29 @@ class CheckpointResponse(BaseModel):
     finished_at: datetime | None
     error_message: str | None
     created_at: datetime
+
+
+class SyncAllPhaseResponse(BaseModel):
+    phase: str
+    status: str
+    items_processed: int = 0
+    items_created: int = 0
+    items_updated: int = 0
+    items_failed: int = 0
+    items_skipped: int = 0
+    error_message: str | None = None
+
+
+class SyncAllReconciliationResponse(BaseModel):
+    products_count: int
+    orders_count: int
+    order_items_count: int
+    orders_without_items: int
+    orders_without_channel: int
+    zero_stock: int
+
+
+class SyncAllResponse(BaseModel):
+    overall_status: str
+    phases: list[SyncAllPhaseResponse]
+    reconciliation: SyncAllReconciliationResponse
