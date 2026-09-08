@@ -8,7 +8,7 @@ function generateDailyData(baseItems: number, baseCapital: number): InventoryCha
   const data: InventoryChartStockPoint[] = [];
   const dailyItems = baseItems / 30;
   const dailyCapital = baseCapital / 30;
-  const now = new Date("2026-07-27");
+  const now = new Date();
 
   for (let i = 29; i >= 0; i--) {
     const date = new Date(now);

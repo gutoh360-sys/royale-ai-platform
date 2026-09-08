@@ -13,7 +13,7 @@ import {
 } from "@/features/executive-prioritization/mocks"
 import type { BriefingData } from "@/features/executive-briefing/types"
 
-const refDate = new Date("2026-07-27")
+const refDate = new Date()
 
 export function useBriefing(): BriefingData {
   return useMemo(() => {

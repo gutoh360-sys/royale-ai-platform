@@ -6,7 +6,7 @@ import { mockStockProducts } from "@/features/inventory-intelligence/mocks";
 import type { InventoryAnalysis } from "@/features/inventory-intelligence/types";
 import type { InventoryDecisionData, FilterMode } from "@/features/inventory-decision-center/types";
 
-const refDate = new Date("2026-07-27");
+const refDate = new Date();
 
 export function generateObservations(
   analyses: InventoryAnalysis[],

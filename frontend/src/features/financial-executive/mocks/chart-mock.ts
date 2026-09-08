@@ -7,7 +7,7 @@ export interface ChartDataPoint {
 function generateDailyData(baseRevenue: number): ChartDataPoint[] {
   const data: ChartDataPoint[] = [];
   const dailyRev = baseRevenue / 30;
-  const now = new Date("2026-07-27");
+  const now = new Date();
 
   for (let i = 29; i >= 0; i--) {
     const date = new Date(now);

@@ -2,7 +2,7 @@ import type { StockProduct, InventoryAnalysis } from "@/features/inventory-intel
 import type { ProductPurchaseData } from "@/features/purchase-intelligence/types"
 import { DefaultInventoryIntelligenceService } from "@/features/inventory-intelligence/services/inventory-intelligence-service"
 
-const refDate = new Date("2026-07-27")
+const refDate = new Date()
 
 const mockProducts: StockProduct[] = [
   { id: "p1", sku: "BT-2001", name: "Fone Bluetooth Pro", category: "Eletrônicos", currentStock: 5, reservedStock: 2, incomingStock: 0, averageDailySales: 3.2, salesLast30Days: 96, salesLast90Days: 280, cost: 82, salePrice: 199, minimumStock: 15, maximumStock: 120, leadTimeDays: 7, lastSaleDate: "2026-07-27", lastPurchaseDate: "2026-07-10", active: true },
