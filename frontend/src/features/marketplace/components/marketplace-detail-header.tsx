@@ -60,9 +60,13 @@ export function MarketplaceDetailHeader({ marketplace }: MarketplaceDetailHeader
             <p className="text-[11px] text-muted-foreground">Crescimento</p>
             <p className={cn(
               "text-sm font-semibold",
-              marketplace.growth >= 0 ? "text-success" : "text-destructive",
+              marketplace.growth === null
+                ? "text-muted-foreground"
+                : marketplace.growth >= 0 ? "text-success" : "text-destructive",
             )}>
-              {marketplace.growth >= 0 ? "+" : ""}{marketplace.growth}%
+              {marketplace.growth === null
+                ? "N/D"
+                : `${marketplace.growth >= 0 ? "+" : ""}${marketplace.growth}%`}
             </p>
           </div>
         </div>

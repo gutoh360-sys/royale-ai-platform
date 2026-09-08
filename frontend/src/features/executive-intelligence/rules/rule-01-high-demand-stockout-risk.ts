@@ -4,7 +4,7 @@ import { MARKETPLACE_GROWTH_THRESHOLD } from "@/features/executive-intelligence/
 export function ruleMarketplaceGrowthWithStockPressure(input: ExecutiveIntelligenceInput): ExecutiveInsight[] {
   const { inventory, marketplace } = input
 
-  if (marketplace.highestGrowth < MARKETPLACE_GROWTH_THRESHOLD) return []
+  if (marketplace.highestGrowth === null || marketplace.highestGrowth < MARKETPLACE_GROWTH_THRESHOLD) return []
   if (inventory.criticalReplenishmentCount === 0) return []
 
   const affectedCount = inventory.criticalReplenishmentCount

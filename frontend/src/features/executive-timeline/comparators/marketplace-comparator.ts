@@ -27,13 +27,15 @@ export function compareMarketplace(previous: ExecutiveSnapshot, current: Executi
     })
   }
 
-  const growthDiff = diff(curr.highestGrowth, prev.highestGrowth)
+  const growthDiff = curr.highestGrowth !== null && prev.highestGrowth !== null
+    ? diff(curr.highestGrowth, prev.highestGrowth)
+    : { direction: "improved" as const, change: 0 }
   if (growthDiff.change !== 0) {
     events.push({
       id: "tl-marketplace-growth",
       category: "marketplace",
       title: "Crescimento do marketplace",
-      description: `Maior crescimento passou de ${prev.highestGrowth}% para ${curr.highestGrowth}%`,
+      description: `Maior crescimento passou de ${prev.highestGrowth ?? "N/D"}% para ${curr.highestGrowth ?? "N/D"}%`,
       direction: growthDiff.direction,
       severity: Math.abs(growthDiff.change) >= 5 ? "high" : "medium",
       impact: growthDiff.direction === "improved" ? "Aumento de receita esperado" : "Possível perda de tração",

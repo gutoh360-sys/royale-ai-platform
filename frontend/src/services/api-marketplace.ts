@@ -2,6 +2,17 @@ import { api } from "@/lib/api";
 import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
 import { type Period } from "@/lib/period";
+
+function getPreviousPeriod(period: Period): Period {
+  const map: Record<Period, Period> = {
+    "today": "7d",
+    "7d": "30d",
+    "30d": "90d",
+    "90d": "12m",
+    "12m": "12m",
+  };
+  return map[period];
+}
 import type { Order, SalesChannel } from "@/types/api";
 import type { MarketplaceData, MarketplaceSummaryData, MarketplaceDataResult } from "@/features/marketplace/types";
 import { groupChannelsByMarketplace, resolveMarketplaceGroup } from "@/features/marketplace/utils/grouping";
@@ -15,11 +26,14 @@ function mapGroupToMarketplace(
   slug: string,
   displayName: string,
   channels: SalesChannel[],
-  orders: Order[],
+  currentOrders: Order[],
+  previousOrders: Order[],
 ): MarketplaceData {
-  const allOrders = ordersForChannels(channels, orders);
-  const revenue = allOrders.reduce((sum, order) => sum + toNumber(order.total_amount), 0);
-  const total = allOrders.length;
+  const allCurrentOrders = ordersForChannels(channels, currentOrders);
+  const allPreviousOrders = ordersForChannels(channels, previousOrders);
+  const currentRevenue = allCurrentOrders.reduce((sum, order) => sum + toNumber(order.total_amount), 0);
+  const previousRevenue = allPreviousOrders.reduce((sum, order) => sum + toNumber(order.total_amount), 0);
+  const total = allCurrentOrders.length;
   const hasAttribution = total > 0;
 
   const health = channels.every((ch) => ch.situacao === 0) ? 0 : 100;
@@ -28,19 +42,23 @@ function mapGroupToMarketplace(
     .sort()
     .reverse()[0] ?? new Date().toISOString();
 
+  const growth = previousRevenue === 0
+    ? null
+    : ((currentRevenue - previousRevenue) / previousRevenue) * 100;
+
   return {
     id: slug,
     slug,
     name: displayName,
     logo: displayName.charAt(0).toUpperCase(),
     status: channels.every((ch) => ch.situacao === 0) ? "paused" : "connected",
-    revenue: hasAttribution ? revenue : 0,
-    formattedRevenue: hasAttribution ? formatCurrency(revenue) : "—",
+    revenue: hasAttribution ? currentRevenue : 0,
+    formattedRevenue: hasAttribution ? formatCurrency(currentRevenue) : "—",
     orders: hasAttribution ? total : 0,
     formattedOrders: hasAttribution ? String(total) : "—",
-    averageTicket: hasAttribution && total > 0 ? revenue / total : 0,
-    formattedAverageTicket: hasAttribution && total > 0 ? formatCurrency(revenue / total) : "—",
-    growth: 0,
+    averageTicket: hasAttribution && total > 0 ? currentRevenue / total : 0,
+    formattedAverageTicket: hasAttribution && total > 0 ? formatCurrency(currentRevenue / total) : "—",
+    growth,
     marketShare: 0,
     formattedMarketShare: "—",
     health,
@@ -55,6 +73,8 @@ function buildSummary(orders: Order[], marketplaces: MarketplaceData[]): Marketp
   const totalOrders = orders.length;
   const withOrders = marketplaces.filter((m) => m.orders > 0);
   const leader = [...withOrders].sort((a, b) => b.revenue - a.revenue)[0];
+  const withGrowth = marketplaces.filter((m) => m.growth !== null);
+  const highestGrowthEntry = [...withGrowth].sort((a, b) => (b.growth ?? 0) - (a.growth ?? 0))[0];
 
   return {
     totalRevenue: formatCurrency(totalRevenue),
@@ -62,17 +82,19 @@ function buildSummary(orders: Order[], marketplaces: MarketplaceData[]): Marketp
     formattedTotalOrders: String(totalOrders),
     averageTicket: totalOrders > 0 ? formatCurrency(totalRevenue / totalOrders) : "—",
     leaderName: leader?.name ?? "-",
-    highestGrowth: 0,
-    highestGrowthName: "-",
+    highestGrowth: highestGrowthEntry?.growth ?? null,
+    highestGrowthName: highestGrowthEntry?.name ?? "-",
     averageHealth: 0,
   };
 }
 
 export async function fetchMarketplaceData(period: Period = "30d"): Promise<MarketplaceDataResult> {
   try {
-    const [channels, orders] = await Promise.all([
+    const previousPeriod = getPreviousPeriod(period);
+    const [channels, currentOrders, previousOrders] = await Promise.all([
       api.get<SalesChannel[]>("/sales-channels"),
       api.get<Order[]>(`/orders?period=${period}`),
+      api.get<Order[]>(`/orders?period=${previousPeriod}`),
     ]);
 
     if (channels.length === 0) {
@@ -84,7 +106,7 @@ export async function fetchMarketplaceData(period: Period = "30d"): Promise<Mark
           formattedTotalOrders: "0",
           averageTicket: "—",
           leaderName: "-",
-          highestGrowth: 0,
+          highestGrowth: null,
           highestGrowthName: "-",
           averageHealth: 0,
         },
@@ -95,12 +117,12 @@ export async function fetchMarketplaceData(period: Period = "30d"): Promise<Mark
 
     const groups = groupChannelsByMarketplace(channels);
     const marketplaces = Array.from(groups.entries()).map(([slug, group]) =>
-      mapGroupToMarketplace(slug, group.displayName, group.channels, orders),
+      mapGroupToMarketplace(slug, group.displayName, group.channels, currentOrders, previousOrders),
     );
 
     return {
       marketplaces,
-      summary: buildSummary(orders, marketplaces),
+      summary: buildSummary(currentOrders, marketplaces),
       status: "success",
       error: null,
     };
@@ -113,7 +135,7 @@ export async function fetchMarketplaceData(period: Period = "30d"): Promise<Mark
         formattedTotalOrders: "0",
         averageTicket: "—",
         leaderName: "-",
-        highestGrowth: 0,
+        highestGrowth: null,
         highestGrowthName: "-",
         averageHealth: 0,
       },

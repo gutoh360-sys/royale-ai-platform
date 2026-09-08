@@ -121,7 +121,8 @@ export function buildMockSummary(marketplaces: MarketplaceData[]): MarketplaceSu
   const totalOrders = marketplaces.reduce((s, m) => s + m.orders, 0);
   const avgTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
   const leader = [...marketplaces].sort((a, b) => b.revenue - a.revenue)[0];
-  const highestGrowth = [...marketplaces].sort((a, b) => b.growth - a.growth)[0];
+  const withGrowth = marketplaces.filter((m) => m.growth !== null);
+  const highestGrowth = [...withGrowth].sort((a, b) => (b.growth ?? 0) - (a.growth ?? 0))[0];
   const avgHealth = Math.round(marketplaces.reduce((s, m) => s + m.health, 0) / marketplaces.length);
 
   return {

@@ -22,7 +22,7 @@ function buildExecutiveSummary(marketplace: {
   name: string;
   formattedRevenue: string;
   formattedMarketShare: string;
-  growth: number;
+  growth: number | null;
   health: number;
   channelCount: number;
 }): string {

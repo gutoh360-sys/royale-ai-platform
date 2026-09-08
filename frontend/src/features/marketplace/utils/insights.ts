@@ -14,7 +14,7 @@ interface MarketplaceFields {
   formattedAverageTicket: string;
   formattedMarketShare: string;
   marketShare: number;
-  growth: number;
+  growth: number | null;
   health: number;
   revenue: number;
   orders: number;
@@ -23,24 +23,30 @@ interface MarketplaceFields {
 export function buildInsights(mp: MarketplaceFields): InsightData[] {
   const insights: InsightData[] = [];
   const healthLabel = getHealthConfig(mp.health).label.toLowerCase();
-  const growthDir = mp.growth >= 0 ? "aumento" : "queda";
-  const growthAbs = Math.abs(mp.growth);
+  const growthAbs = mp.growth !== null ? Math.abs(mp.growth) : 0;
+  const growthDir = mp.growth === null ? "sem dados" : mp.growth >= 0 ? "aumento" : "queda";
 
   insights.push({
     fact: `Receita de ${mp.formattedRevenue} no período.`,
     reason:
-      mp.growth >= 0
-        ? `O crescimento de ${mp.growth}% foi impulsionado pelo desempenho consistente do canal, que registrou ${mp.formattedOrders} pedidos com ticket médio de ${mp.formattedAverageTicket}.`
-        : `A queda de ${growthAbs}% reflete a redução no volume de pedidos, que totalizaram ${mp.formattedOrders} no período.`,
+      mp.growth === null
+        ? `Sem dados de crescimento disponíveis para o período anterior. Canal registrou ${mp.formattedOrders} pedidos com ticket médio de ${mp.formattedAverageTicket}.`
+        : mp.growth >= 0
+          ? `O crescimento de ${mp.growth}% foi impulsionado pelo desempenho consistente do canal, que registrou ${mp.formattedOrders} pedidos com ticket médio de ${mp.formattedAverageTicket}.`
+          : `A queda de ${growthAbs}% reflete a redução no volume de pedidos, que totalizaram ${mp.formattedOrders} no período.`,
     impact: `${mp.name} representa ${mp.formattedMarketShare} do faturamento total da operação.`,
     action:
-      mp.growth >= 0
-        ? "Manter o ritmo de reposição e avaliar ampliação do catálogo nos produtos de maior giro."
-        : "Revisar precificação e condições de entrega para recuperar competitividade no canal.",
+      mp.growth === null
+        ? "Monitorar o próximo período para estabelecer comparação de crescimento."
+        : mp.growth >= 0
+          ? "Manter o ritmo de reposição e avaliar ampliação do catálogo nos produtos de maior giro."
+          : "Revisar precificação e condições de entrega para recuperar competitividade no canal.",
   });
 
   insights.push({
-    fact: `Crescimento de ${growthAbs}% em relação ao período anterior.`,
+    fact: mp.growth === null
+      ? "Crescimento indisponível para comparação."
+      : `Crescimento de ${growthAbs}% em relação ao período anterior.`,
     reason:
       mp.health >= 70
         ? `O canal operou com saúde de ${mp.health}/100, classificada como ${healthLabel}, indicando estabilidade operacional.`
@@ -84,14 +90,14 @@ export function buildRecommendations(mp: MarketplaceFields): RecommendationData[
     });
   }
 
-  if (mp.growth > 15) {
+  if (mp.growth !== null && mp.growth > 15) {
     recs.push({
       action: `Acelerar investimento no ${mp.name}`,
       reason: `Crescimento de ${mp.growth}% indica potencial para ampliar variedade de produtos e aumentar estoque dos itens de maior giro.`,
     });
   }
 
-  if (mp.growth < -5) {
+  if (mp.growth !== null && mp.growth < -5) {
     recs.push({
       action: `Analisar concorrência no ${mp.name}`,
       reason: `Queda de ${Math.abs(mp.growth)}% nas vendas. Avaliar posicionamento dos anúncios, preço e condições de frete.`,
@@ -119,8 +125,8 @@ export type InsightPriority = "alta" | "media" | "baixa";
 
 export function getInsightPriority(mp: MarketplaceFields): InsightPriority[] {
   return [
-    mp.health < 70 ? "alta" : mp.growth < 0 ? "media" : "baixa",
-    mp.health < 70 || mp.growth < -5 ? "alta" : mp.growth < 5 ? "media" : "baixa",
+    mp.health < 70 ? "alta" : mp.growth !== null && mp.growth < 0 ? "media" : "baixa",
+    mp.health < 70 || (mp.growth !== null && mp.growth < -5) ? "alta" : mp.growth !== null && mp.growth < 5 ? "media" : "baixa",
     mp.marketShare > 30 && mp.health < 80 ? "alta" : mp.marketShare > 10 ? "media" : "baixa",
   ];
 }
@@ -138,9 +144,9 @@ export function buildNextActions(mp: MarketplaceFields): NextAction[] {
     actions.push({ action: `Reforçar atendimento e reputação no ${mp.name}` });
   }
 
-  if (mp.growth > 15) {
+  if (mp.growth !== null && mp.growth > 15) {
     actions.push({ action: "Reforçar estoque dos produtos de maior giro." });
-  } else if (mp.growth < 0) {
+  } else if (mp.growth !== null && mp.growth < 0) {
     actions.push({ action: "Revisar anúncios com menor conversão e ajustar precificação." });
   } else {
     actions.push({ action: "Monitorar crescimento do canal semanalmente." });
@@ -154,11 +160,11 @@ export function buildNextActions(mp: MarketplaceFields): NextAction[] {
     actions.push({ action: "Avaliar expansão do catálogo para novos segmentos." });
   }
 
-  if (mp.health >= 90 && mp.growth > 10) {
+  if (mp.health >= 90 && mp.growth !== null && mp.growth > 10) {
     actions.push({ action: "Estudar abertura de novos canais de venda." });
   }
 
-  if (mp.growth < -10) {
+  if (mp.growth !== null && mp.growth < -10) {
     actions.push({ action: "Realizar análise de concorrência detalhada para o canal." });
   }
 

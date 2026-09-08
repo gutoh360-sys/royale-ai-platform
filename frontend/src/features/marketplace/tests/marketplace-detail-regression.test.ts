@@ -27,6 +27,12 @@ const criticalMarketplace = {
   orders: 167,
 };
 
+const nullGrowthMarketplace = {
+  ...validMarketplace,
+  name: "New Channel",
+  growth: null,
+};
+
 describe("MarketplaceDetailPage - hooks ordering regression", () => {
   it("MarketplaceDetailPage component can be imported", async () => {
     const mod = await import("@/features/marketplace/components/marketplace-detail-page");
@@ -43,6 +49,11 @@ describe("buildInsights - edge cases", () => {
 
   it("returns 3 insights for critical marketplace", () => {
     const result = buildInsights(criticalMarketplace);
+    expect(result).toHaveLength(3);
+  });
+
+  it("returns 3 insights for null growth marketplace", () => {
+    const result = buildInsights(nullGrowthMarketplace);
     expect(result).toHaveLength(3);
   });
 });

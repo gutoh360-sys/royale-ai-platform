@@ -15,7 +15,7 @@ export interface MarketplaceData {
   formattedOrders: string;
   averageTicket: number;
   formattedAverageTicket: string;
-  growth: number;
+  growth: number | null;
   marketShare: number;
   formattedMarketShare: string;
   health: number;
@@ -30,7 +30,7 @@ export interface MarketplaceSummaryData {
   formattedTotalOrders: string;
   averageTicket: string;
   leaderName: string;
-  highestGrowth: number;
+  highestGrowth: number | null;
   highestGrowthName: string;
   averageHealth: number;
 }

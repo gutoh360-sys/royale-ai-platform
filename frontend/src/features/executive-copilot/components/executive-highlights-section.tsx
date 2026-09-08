@@ -40,7 +40,7 @@ export function ExecutiveHighlightsSection({ snapshots }: Props) {
     highlights.push(`Crescimento de ${sales.sales.growth}% nas vendas.`)
   }
 
-  if (marketplace.summary.highestGrowth > 0) {
+  if (marketplace.summary.highestGrowth !== null && marketplace.summary.highestGrowth > 0) {
     highlights.push(`Maior crescimento entre marketplaces: ${marketplace.summary.highestGrowth}%.`)
   }
 
