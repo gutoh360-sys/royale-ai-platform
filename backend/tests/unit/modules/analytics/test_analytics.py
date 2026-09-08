@@ -1,8 +1,10 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.core.period import BUSINESS_TZ, period_to_range
 
 from backend.database.models.category import Category
 from backend.database.models.order import Order
@@ -46,6 +48,7 @@ async def _order(
     external_id: str,
     status: str,
     total_amount: float,
+    ordered_at: datetime | None = None,
 ) -> Order:
     order = Order(
         id=uuid.uuid4(),
@@ -55,7 +58,7 @@ async def _order(
         customer_name="Cliente",
         status=status,
         total_amount=total_amount,
-        ordered_at=datetime.now(UTC),
+        ordered_at=ordered_at or datetime.now(UTC),
     )
     db_session.add(order)
     await db_session.flush()
@@ -201,3 +204,60 @@ async def test_dashboard_all_pending_orders(db_session: AsyncSession) -> None:
     assert dashboard.orders_by_status == {"pending": 2}
     assert len(dashboard.sales_by_period) == 1
     assert dashboard.sales_by_period[0].revenue == Decimal("300.0")
+
+
+async def test_dashboard_filters_by_period(db_session: AsyncSession) -> None:
+    """Orders outside the period window must NOT count toward summary metrics."""
+    now = datetime.now(BUSINESS_TZ)
+
+    # Inside 7d window
+    await _order(db_session, external_id="1", status="completed", total_amount=100.0,
+                 ordered_at=now - timedelta(days=2))
+    await _order(db_session, external_id="2", status="completed", total_amount=50.0,
+                 ordered_at=now - timedelta(days=5))
+
+    # Outside 7d window (10 days ago)
+    await _order(db_session, external_id="3", status="completed", total_amount=999.0,
+                 ordered_at=now - timedelta(days=10))
+
+    await db_session.flush()
+
+    repo = AnalyticsRepository(db_session)
+    start, end = period_to_range("7d", BUSINESS_TZ)
+
+    total = await repo.count_orders_in_period(start, end)
+    completed = await repo.count_completed_orders_in_period(start, end)
+    rev = await repo.revenue_in_period(start, end)
+    statuses = await repo.orders_by_status_in_period(start, end)
+
+    assert total == 2
+    assert completed == 2
+    assert rev == 150.0
+    assert statuses == {"completed": 2}
+
+
+async def test_dashboard_zero_when_no_orders_in_period(db_session: AsyncSession) -> None:
+    now = datetime.now(BUSINESS_TZ)
+    await _order(db_session, external_id="1", status="completed", total_amount=100.0,
+                 ordered_at=now - timedelta(days=60))
+    await db_session.flush()
+
+    repo = AnalyticsRepository(db_session)
+    start, end = period_to_range("7d", BUSINESS_TZ)
+
+    assert await repo.count_orders_in_period(start, end) == 0
+    assert await repo.revenue_in_period(start, end) == 0.0
+
+
+async def test_dashboard_12m_window(db_session: AsyncSession) -> None:
+    now = datetime.now(BUSINESS_TZ)
+    await _order(db_session, external_id="1", status="completed", total_amount=200.0,
+                 ordered_at=now - timedelta(days=365))
+    await _order(db_session, external_id="2", status="completed", total_amount=100.0,
+                 ordered_at=now - timedelta(days=366))
+    await db_session.flush()
+
+    repo = AnalyticsRepository(db_session)
+    start, end = period_to_range("12m", BUSINESS_TZ)
+    total = await repo.count_orders_in_period(start, end)
+    assert total == 1
