@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import type { AnalyticsPeriodDays } from "@/types/api";
+import { PERIOD_OPTIONS, type Period } from "@/lib/period";
 
 function useGreeting() {
   return useMemo(() => {
@@ -26,32 +26,26 @@ function useFormattedDate() {
   );
 }
 
-const periods: { label: string; days: AnalyticsPeriodDays }[] = [
-  { label: "Hoje", days: 1 },
-  { label: "7 dias", days: 7 },
-  { label: "30 dias", days: 30 },
-];
-
 interface PeriodSelectorProps {
-  days: AnalyticsPeriodDays;
-  onDaysChange?: (days: AnalyticsPeriodDays) => void;
+  period: Period;
+  onPeriodChange?: (period: Period) => void;
 }
 
-function PeriodSelector({ days, onDaysChange }: PeriodSelectorProps) {
+function PeriodSelector({ period, onPeriodChange }: PeriodSelectorProps) {
   return (
     <div className="flex items-center gap-1 rounded-lg border p-0.5">
-      {periods.map((period) => (
+      {PERIOD_OPTIONS.map((opt) => (
         <button
-          key={period.days}
-          onClick={() => onDaysChange?.(period.days)}
+          key={opt.value}
+          onClick={() => onPeriodChange?.(opt.value)}
           className={cn(
             "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            days === period.days
+            period === opt.value
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {period.label}
+          {opt.label}
         </button>
       ))}
     </div>
@@ -59,11 +53,11 @@ function PeriodSelector({ days, onDaysChange }: PeriodSelectorProps) {
 }
 
 interface DashboardHeaderProps {
-  days?: AnalyticsPeriodDays;
-  onDaysChange?: (days: AnalyticsPeriodDays) => void;
+  period?: Period;
+  onPeriodChange?: (period: Period) => void;
 }
 
-export function DashboardHeader({ days = 7, onDaysChange }: DashboardHeaderProps) {
+export function DashboardHeader({ period = "7d", onPeriodChange }: DashboardHeaderProps) {
   const greeting = useGreeting();
   const date = useFormattedDate();
 
@@ -80,7 +74,7 @@ export function DashboardHeader({ days = 7, onDaysChange }: DashboardHeaderProps
           <p className="text-xs text-muted-foreground capitalize">{date}</p>
         </div>
       </div>
-      <PeriodSelector days={days} onDaysChange={onDaysChange} />
+      <PeriodSelector period={period} onPeriodChange={onPeriodChange} />
     </div>
   );
 }

@@ -1,18 +1,18 @@
 import { DashboardHeader } from "./dashboard-header";
 import { ContentContainer } from "@/components/shell/content-container";
-import type { AnalyticsPeriodDays } from "@/types/api";
+import type { Period } from "@/lib/period";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
-  days?: AnalyticsPeriodDays;
-  onDaysChange?: (days: AnalyticsPeriodDays) => void;
+  period?: Period;
+  onPeriodChange?: (period: Period) => void;
 }
 
-export function DashboardLayout({ children, days = 7, onDaysChange }: DashboardLayoutProps) {
+export function DashboardLayout({ children, period = "7d", onPeriodChange }: DashboardLayoutProps) {
   return (
     <ContentContainer>
       <div className="mb-10">
-        <DashboardHeader days={days} onDaysChange={onDaysChange} />
+        <DashboardHeader period={period} onPeriodChange={onPeriodChange} />
       </div>
       <div className="flex flex-col gap-8">{children}</div>
     </ContentContainer>

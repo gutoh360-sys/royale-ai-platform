@@ -1,11 +1,12 @@
 import { api } from "@/lib/api";
 import { toNumber } from "@/lib/api-values";
-import type { AnalyticsPeriodDays, DashboardAnalytics } from "@/types/api";
+import type { DashboardAnalytics } from "@/types/api";
 import type { CommandCenterData, CommandCenterResult } from "@/features/dashboard/executive-command-center/types";
+import type { Period } from "@/lib/period";
 
-export async function fetchCommandCenterData(days: AnalyticsPeriodDays = 7): Promise<CommandCenterResult> {
+export async function fetchCommandCenterData(period: Period = "7d"): Promise<CommandCenterResult> {
   try {
-    const analytics = await api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`);
+    const analytics = await api.get<DashboardAnalytics>(`/analytics/dashboard?period=${period}`);
 
     const completed = toNumber(analytics.orders_by_status?.completed);
     const pending = toNumber(analytics.orders_by_status?.pending);

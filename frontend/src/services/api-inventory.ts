@@ -1,9 +1,10 @@
 import { api } from "@/lib/api";
 import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
-import type { AnalyticsPeriodDays, Product, DashboardAnalytics } from "@/types/api";
+import type { Product, DashboardAnalytics } from "@/types/api";
 import type { InventoryData, InventoryDataResult } from "@/features/inventory-executive/types";
 import type { InventoryIntelligenceSummary } from "@/features/inventory-intelligence/types";
+import type { Period } from "@/lib/period";
 
 function buildSummary(products: Product[], analytics: DashboardAnalytics): InventoryIntelligenceSummary {
   const withStock = products.filter((p) => p.stock_quantity > 0);
@@ -29,11 +30,11 @@ function buildSummary(products: Product[], analytics: DashboardAnalytics): Inven
   };
 }
 
-export async function fetchInventoryData(days: AnalyticsPeriodDays = 7): Promise<InventoryDataResult> {
+export async function fetchInventoryData(period: Period = "7d"): Promise<InventoryDataResult> {
   try {
     const [products, analytics] = await Promise.all([
       api.get<Product[]>("/products"),
-      api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`),
+      api.get<DashboardAnalytics>(`/analytics/dashboard?period=${period}`),
     ]);
 
     if (products.length === 0) {

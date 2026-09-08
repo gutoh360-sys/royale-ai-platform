@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import type { CommandCenterResult } from "@/features/dashboard/executive-command-center/types";
 import { fetchCommandCenterData } from "@/services/api-command-center";
-import type { AnalyticsPeriodDays } from "@/types/api";
+import type { Period } from "@/lib/period";
 
-export function useExecutiveCommandCenter(days: AnalyticsPeriodDays = 7): CommandCenterResult {
+export function useExecutiveCommandCenter(period: Period = "7d"): CommandCenterResult {
   const [result, setResult] = useState<CommandCenterResult>({
     data: {
       status: { healthScore: 0, label: "", summary: "" },
@@ -18,8 +18,8 @@ export function useExecutiveCommandCenter(days: AnalyticsPeriodDays = 7): Comman
   });
 
   useEffect(() => {
-    fetchCommandCenterData(days).then(setResult);
-  }, [days]);
+    fetchCommandCenterData(period).then(setResult);
+  }, [period]);
 
   return result;
 }

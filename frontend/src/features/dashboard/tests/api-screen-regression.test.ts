@@ -37,7 +37,7 @@ describe("priority screens API regression", () => {
     const page = readSource("features/inventory-executive/components/inventory-detail-page.tsx");
 
     expect(service).toContain('api.get<Product[]>("/products")');
-    expect(service).toContain('api.get<DashboardAnalytics>(`/analytics/dashboard?days=${days}`)');
+    expect(service).toContain('api.get<DashboardAnalytics>(`/analytics/dashboard?period=${period}`)');
     expect(page.indexOf('if (status === "error")')).toBeLessThan(page.indexOf("if (!inventory) {"));
     expect(page).toContain("Erro ao carregar dados de estoque");
   });

@@ -16,15 +16,15 @@ import { useInventoryData } from "@/features/inventory-executive/hooks/use-inven
 import { useSalesData } from "@/features/sales-executive/hooks/use-sales-data";
 import { useProductsData } from "@/features/products-executive/hooks/use-products-data";
 import type { ActionItem } from "./executive-action-list";
-import type { AnalyticsPeriodDays } from "@/types/api";
+import type { Period } from "@/lib/period";
 
 export function DashboardPage() {
-  const [days, setDays] = useState<AnalyticsPeriodDays>(7);
+  const [period, setPeriod] = useState<Period>("7d");
 
-  const { data: cc, status: ccStatus } = useExecutiveCommandCenter(days);
+  const { data: cc, status: ccStatus } = useExecutiveCommandCenter(period);
   const { summary: mpSummary, status: mpStatus } = useMarketplaceData();
-  const { inventory, status: invStatus } = useInventoryData(days);
-  const { sales, status: salesStatus } = useSalesData(days);
+  const { inventory, status: invStatus } = useInventoryData(period);
+  const { sales, status: salesStatus } = useSalesData(period);
   const { summary: prSummary, status: prStatus } = useProductsData();
 
   const isLoading = ccStatus === "loading";
@@ -83,7 +83,7 @@ export function DashboardPage() {
     : "Carregando...";
 
   return (
-    <DashboardLayout days={days} onDaysChange={setDays}>
+    <DashboardLayout period={period} onPeriodChange={setPeriod}>
       <div className="flex flex-col gap-8">
         <div className="flex flex-col gap-8">
           <ExecutiveHealthSummary

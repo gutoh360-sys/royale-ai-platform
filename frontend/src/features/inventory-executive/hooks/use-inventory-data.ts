@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import type { InventoryDataResult } from "@/features/inventory-executive/types";
 import { fetchInventoryData } from "@/services/api-inventory";
-import type { AnalyticsPeriodDays } from "@/types/api";
+import type { Period } from "@/lib/period";
 
-export function useInventoryData(days: AnalyticsPeriodDays = 7): InventoryDataResult {
+export function useInventoryData(period: Period = "7d"): InventoryDataResult {
   const [result, setResult] = useState<InventoryDataResult>({
     inventory: null,
     status: "loading",
@@ -13,8 +13,8 @@ export function useInventoryData(days: AnalyticsPeriodDays = 7): InventoryDataRe
   });
 
   useEffect(() => {
-    fetchInventoryData(days).then(setResult);
-  }, [days]);
+    fetchInventoryData(period).then(setResult);
+  }, [period]);
 
   return result;
 }

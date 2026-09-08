@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react"
 import type { SalesDataResult } from "../types"
 import { fetchSalesData } from "@/services/api-orders"
-import type { AnalyticsPeriodDays } from "@/types/api"
+import type { Period } from "@/lib/period"
 
-export function useSalesData(days: AnalyticsPeriodDays = 7): SalesDataResult {
+export function useSalesData(period: Period = "7d"): SalesDataResult {
   const [result, setResult] = useState<SalesDataResult>({
     sales: null,
     status: "loading",
@@ -13,8 +13,8 @@ export function useSalesData(days: AnalyticsPeriodDays = 7): SalesDataResult {
   })
 
   useEffect(() => {
-    fetchSalesData(days).then(setResult)
-  }, [days])
+    fetchSalesData(period).then(setResult)
+  }, [period])
 
   return result
 }

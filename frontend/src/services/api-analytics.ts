@@ -4,9 +4,10 @@ import { formatCurrency } from "@/lib/format";
 import type { DashboardAnalytics } from "@/types/api";
 import type { ExecutiveMetric } from "@/features/dashboard/executive-summary/types";
 import { Package, ShoppingCart, TrendingUp, DollarSign } from "lucide-react";
+import type { Period } from "@/lib/period";
 
-export async function fetchDashboardAnalytics(): Promise<DashboardAnalytics> {
-  return api.get<DashboardAnalytics>("/analytics/dashboard?days=30");
+export async function fetchDashboardAnalytics(period: Period = "30d"): Promise<DashboardAnalytics> {
+  return api.get<DashboardAnalytics>(`/analytics/dashboard?period=${period}`);
 }
 
 export function mapToMetrics(data: DashboardAnalytics): ExecutiveMetric[] {

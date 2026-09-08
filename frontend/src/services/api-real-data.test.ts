@@ -209,7 +209,7 @@ describe("real backend data services", () => {
   it("keeps Inventory on real products plus analytics", async () => {
     stubBackendReads();
 
-    const result = await fetchInventoryData(7);
+    const result = await fetchInventoryData("7d");
 
     expect(result.status).toBe("success");
     expect(result.inventory?.itemsInStock).toBe(1);
@@ -219,7 +219,7 @@ describe("real backend data services", () => {
   it("keeps Sales on real orders plus analytics", async () => {
     stubBackendReads();
 
-    const result = await fetchSalesData(7);
+    const result = await fetchSalesData("7d");
 
     expect(result.status).toBe("success");
     expect(result.sales?.orders).toBe(2);
@@ -229,7 +229,7 @@ describe("real backend data services", () => {
   it("keeps Dashboard command center on real analytics", async () => {
     stubBackendReads();
 
-    const result = await fetchCommandCenterData(7);
+    const result = await fetchCommandCenterData("7d");
 
     expect(result.status).toBe("success");
     expect(result.data.status.summary).toContain("2 pedidos");
