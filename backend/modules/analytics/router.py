@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, Query
 
+from backend.core.period import VALID_PERIODS
 from backend.core.security.deps import require_admin_auth
 from backend.modules.analytics.di import get_analytics_service
-from backend.modules.analytics.schemas import AnalyticsDashboardResponse
+from backend.modules.analytics.schemas import AnalyticsDashboardResponse, ProductAnalyticsResponse
 from backend.modules.analytics.service import AnalyticsService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -14,7 +15,22 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
     dependencies=[Depends(require_admin_auth)],
 )
 async def get_dashboard(
-    days: int = Query(default=30, ge=1, le=365),
+    period: str = Query(default="30d"),
+    days: int | None = Query(default=None, deprecated=True),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> AnalyticsDashboardResponse:
-    return await service.get_dashboard(days=days)
+    if days is not None and period == "30d":
+        period_map = {1: "today", 7: "7d", 30: "30d"}
+        period = period_map.get(days, "30d")
+    return await service.get_dashboard(period=period)
+
+
+@router.get(
+    "/products",
+    response_model=ProductAnalyticsResponse,
+    dependencies=[Depends(require_admin_auth)],
+)
+async def get_product_analytics(
+    service: AnalyticsService = Depends(get_analytics_service),
+) -> ProductAnalyticsResponse:
+    return await service.get_product_analytics()

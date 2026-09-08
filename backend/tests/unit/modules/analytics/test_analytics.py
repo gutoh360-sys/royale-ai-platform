@@ -114,7 +114,7 @@ async def test_service_dashboard_kpis(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     service = AnalyticsService(AnalyticsRepository(db_session))
-    dashboard = await service.get_dashboard(days=30)
+    dashboard = await service.get_dashboard(period="30d")
 
     assert dashboard.total_products == 2
     assert dashboard.active_products == 2
@@ -125,6 +125,7 @@ async def test_service_dashboard_kpis(db_session: AsyncSession) -> None:
     assert dashboard.revenue == Decimal("150.0")
     assert dashboard.average_ticket == Decimal("75.0")
     assert len(dashboard.sales_by_period) == 1
+    assert dashboard.period == "30d"
 
 
 async def test_service_dashboard_average_ticket_none_without_orders(
@@ -135,12 +136,13 @@ async def test_service_dashboard_average_ticket_none_without_orders(
     await db_session.flush()
 
     service = AnalyticsService(AnalyticsRepository(db_session))
-    dashboard = await service.get_dashboard(days=30)
+    dashboard = await service.get_dashboard(period="30d")
 
     assert dashboard.total_orders == 0
     assert dashboard.average_ticket is None
     assert dashboard.revenue == Decimal("0")
     assert dashboard.sales_by_period == []
+    assert dashboard.period == "30d"
 
 
 async def test_revenue_only_counts_completed_orders(db_session: AsyncSession) -> None:
@@ -168,10 +170,11 @@ async def test_average_ticket_uses_only_completed(db_session: AsyncSession) -> N
     await db_session.flush()
 
     service = AnalyticsService(AnalyticsRepository(db_session))
-    dashboard = await service.get_dashboard(days=30)
+    dashboard = await service.get_dashboard(period="30d")
 
     assert dashboard.revenue == Decimal("300.0")
     assert dashboard.average_ticket == Decimal("150.0")
+    assert dashboard.period == "30d"
 
 
 async def test_sales_by_period_includes_all_statuses(db_session: AsyncSession) -> None:
@@ -196,7 +199,7 @@ async def test_dashboard_all_pending_orders(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     service = AnalyticsService(AnalyticsRepository(db_session))
-    dashboard = await service.get_dashboard(days=30)
+    dashboard = await service.get_dashboard(period="30d")
 
     assert dashboard.total_orders == 2
     assert dashboard.revenue == Decimal("0")
@@ -204,6 +207,7 @@ async def test_dashboard_all_pending_orders(db_session: AsyncSession) -> None:
     assert dashboard.orders_by_status == {"pending": 2}
     assert len(dashboard.sales_by_period) == 1
     assert dashboard.sales_by_period[0].revenue == Decimal("300.0")
+    assert dashboard.period == "30d"
 
 
 async def test_dashboard_filters_by_period(db_session: AsyncSession) -> None:
@@ -261,3 +265,20 @@ async def test_dashboard_12m_window(db_session: AsyncSession) -> None:
     start, end = period_to_range("12m", BUSINESS_TZ)
     total = await repo.count_orders_in_period(start, end)
     assert total == 1
+
+
+async def test_service_dashboard_uses_period(db_session: AsyncSession) -> None:
+    now = datetime.now(BUSINESS_TZ)
+    await _order(db_session, external_id="1", status="completed", total_amount=100.0,
+                 ordered_at=now - timedelta(days=2))
+    await _order(db_session, external_id="2", status="completed", total_amount=500.0,
+                 ordered_at=now - timedelta(days=40))
+    await db_session.flush()
+
+    service = AnalyticsService(AnalyticsRepository(db_session))
+    dashboard = await service.get_dashboard(period="7d")
+
+    assert dashboard.total_orders == 1
+    assert dashboard.revenue == Decimal("100.0")
+    assert dashboard.average_ticket == Decimal("100.0")
+    assert dashboard.period == "7d"
