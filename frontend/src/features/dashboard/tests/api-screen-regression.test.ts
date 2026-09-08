@@ -14,7 +14,7 @@ describe("priority screens API regression", () => {
     const page = readSource("features/marketplace/components/marketplace-overview.tsx");
 
     expect(service).toContain('api.get<SalesChannel[]>("/sales-channels")');
-    expect(service).toContain('api.get<Order[]>("/orders")');
+    expect(service).toContain("api.get<Order[]>(`/orders?period=${period}`)");
     expect(service).toContain("groupChannelsByMarketplace");
     expect(service).not.toMatch(/mock/i);
     expect(page).toContain('status === "error"');

@@ -1,6 +1,7 @@
 import { api } from "@/lib/api";
 import { toNumber } from "@/lib/api-values";
 import { formatCurrency } from "@/lib/format";
+import { type Period } from "@/lib/period";
 import type { Order, SalesChannel } from "@/types/api";
 import type { MarketplaceData, MarketplaceSummaryData, MarketplaceDataResult } from "@/features/marketplace/types";
 import { groupChannelsByMarketplace, resolveMarketplaceGroup } from "@/features/marketplace/utils/grouping";
@@ -67,11 +68,11 @@ function buildSummary(orders: Order[], marketplaces: MarketplaceData[]): Marketp
   };
 }
 
-export async function fetchMarketplaceData(): Promise<MarketplaceDataResult> {
+export async function fetchMarketplaceData(period: Period = "30d"): Promise<MarketplaceDataResult> {
   try {
     const [channels, orders] = await Promise.all([
       api.get<SalesChannel[]>("/sales-channels"),
-      api.get<Order[]>("/orders"),
+      api.get<Order[]>(`/orders?period=${period}`),
     ]);
 
     if (channels.length === 0) {

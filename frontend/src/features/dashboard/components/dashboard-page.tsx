@@ -22,7 +22,7 @@ export function DashboardPage() {
   const [period, setPeriod] = useState<Period>("7d");
 
   const { data: cc, status: ccStatus } = useExecutiveCommandCenter(period);
-  const { summary: mpSummary, status: mpStatus } = useMarketplaceData();
+  const { summary: mpSummary, status: mpStatus } = useMarketplaceData(period);
   const { inventory, status: invStatus } = useInventoryData(period);
   const { sales, status: salesStatus } = useSalesData(period);
   const { summary: prSummary, status: prStatus } = useProductsData();

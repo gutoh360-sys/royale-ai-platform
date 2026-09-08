@@ -173,7 +173,7 @@ describe("real backend data services", () => {
     const result = await fetchMarketplaceData();
 
     expect(fetchMock).toHaveBeenCalledWith("/api/backend/sales-channels", expect.any(Object));
-    expect(fetchMock).toHaveBeenCalledWith("/api/backend/orders", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/orders?period=30d", expect.any(Object));
     expect(result.status).toBe("success");
     expect(result.marketplaces.map((m) => m.name)).toEqual(["Mercado Livre", "Shopee", "Amazon"]);
     expect(result.summary.totalRevenue).not.toContain("NaN");

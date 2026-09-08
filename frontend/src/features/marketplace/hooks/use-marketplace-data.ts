@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import type { MarketplaceDataResult } from "@/features/marketplace/types";
 import { fetchMarketplaceData } from "@/services/api-marketplace";
+import { type Period } from "@/lib/period";
 
-export function useMarketplaceData(): MarketplaceDataResult {
+export function useMarketplaceData(period: Period = "30d"): MarketplaceDataResult {
   const [result, setResult] = useState<MarketplaceDataResult>({
     marketplaces: [],
     summary: {
@@ -22,8 +23,8 @@ export function useMarketplaceData(): MarketplaceDataResult {
   });
 
   useEffect(() => {
-    fetchMarketplaceData().then(setResult);
-  }, []);
+    fetchMarketplaceData(period).then(setResult);
+  }, [period]);
 
   return result;
 }
