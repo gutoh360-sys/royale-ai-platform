@@ -19,7 +19,7 @@ describe("Bling sync central runtime safety", () => {
   it("renders the page shell without status data", () => {
     const html = renderToString(React.createElement(BlingSyncPage));
 
-    expect(html).toContain("Central de Sincronização Bling");
+    expect(html).toContain("Integrações");
     expect(html).toContain("Produtos");
     expect(html).toContain("Itens dos Pedidos");
   });

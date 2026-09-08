@@ -108,7 +108,7 @@ export default function BlingSyncPage() {
   return (
     <div className="flex flex-col gap-6 p-6">
       <PageTitle
-        title="Central de Sincronização Bling"
+        title="Integrações"
         description="Operações de sincronização e backfill do Bling."
       />
       <ProductSyncCard addLog={addLog} />
