@@ -134,7 +134,7 @@ class AnalyticsRepository:
 
     async def count_completed_orders_in_period(self, start: datetime, end: datetime) -> int:
         stmt = select(func.count(Order.id)).where(
-            Order.status == "completed",
+            Order.status != "cancelled",
             Order.ordered_at >= start, Order.ordered_at < end,
         )
         result = await self._session.execute(stmt)
@@ -142,7 +142,7 @@ class AnalyticsRepository:
 
     async def revenue_in_period(self, start: datetime, end: datetime) -> float:
         stmt = select(func.coalesce(func.sum(Order.total_amount), 0)).where(
-            Order.status == "completed",
+            Order.status != "cancelled",
             Order.ordered_at >= start, Order.ordered_at < end,
         )
         result = await self._session.execute(stmt)
@@ -165,22 +165,27 @@ class AnalyticsRepository:
 
         stmt = (
             select(
-                Order.channel_id,
+                SalesChannel.id.label("sales_channel_id"),
+                SalesChannel.name.label("sales_channel_name"),
+                SalesChannel.tipo.label("sales_channel_tipo"),
                 order_count.label("order_count"),
                 total_amount.label("total_amount"),
             )
+            .outerjoin(SalesChannel, SalesChannel.id == Order.channel_id)
             .where(
-                Order.status == "completed",
+                Order.status != "cancelled",
                 Order.ordered_at >= start,
                 Order.ordered_at < end,
             )
-            .group_by(Order.channel_id)
+            .group_by(SalesChannel.id, SalesChannel.name, SalesChannel.tipo)
             .order_by(order_count.desc())
         )
         result = await self._session.execute(stmt)
         return [
             {
-                "channel_id": row.channel_id,
+                "sales_channel_id": str(row.sales_channel_id) if row.sales_channel_id else None,
+                "sales_channel_name": row.sales_channel_name,
+                "sales_channel_tipo": row.sales_channel_tipo,
                 "order_count": int(row.order_count),
                 "total_amount": float(row.total_amount),
             }

@@ -47,7 +47,14 @@ function mapItemToMarketplace(
     : ((currentRevenue - previousRevenue) / previousRevenue) * 100;
 
   const matchedChannels = channels.filter(
-    (ch) => ch.id === item.channel_id || ch.name?.toLowerCase() === item.channel_name.toLowerCase(),
+    (ch) => {
+      const name = ch.name?.toLowerCase() ?? "";
+      const tipo = ch.tipo?.toLowerCase() ?? "";
+      const slug = item.marketplace_slug.toLowerCase();
+      return name.includes(slug) || tipo.includes(slug) ||
+             slug.includes(name.replace(/\s+/g, "")) ||
+             slug.includes(tipo.replace(/\s+/g, ""));
+    },
   );
 
   return {

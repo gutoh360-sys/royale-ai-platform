@@ -94,63 +94,77 @@ class AnalyticsService:
 
         raw_rows = await self._repository.marketplace_revenue_in_period(start, end)
 
-        marketplace_map = {
-            "mercadolivre": "Mercado Livre",
-            "mercadolivre mercado livre": "Mercado Livre",
-            "shopee": "Shopee",
-            "amazon": "Amazon",
-            "magalu": "Magazine Luiza",
-            "magazine luiza": "Magazine Luiza",
-            "americanas": "Americanas",
-            "casas bahia": "Casas Bahia",
-            "casasbahia": "Casas Bahia",
-            "aliexpress": "AliExpress",
-            "shein": "Shein",
-            "amazon seller": "Amazon",
-            "ml": "Mercado Livre",
-            "meli": "Mercado Livre",
-        }
+        def normalize_for_grouping(value: str) -> str:
+            import unicodedata
+            value = value.strip().lower()
+            value = unicodedata.normalize("NFD", value)
+            value = "".join(c for c in value if unicodedata.category(c) != "Mn")
+            value = "".join(c for c in value if c.isalnum())
+            return value
 
-        slug_map = {
-            "Mercado Livre": "mercadolivre",
-            "Shopee": "shopee",
-            "Amazon": "amazon",
-            "Magazine Luiza": "magalu",
-            "Americanas": "americanas",
-            "Casas Bahia": "casasbahia",
-            "AliExpress": "aliexpress",
-            "Shein": "shein",
-        }
+        GROUP_RULES = [
+            ("amazon", "Amazon", ["amazon"]),
+            ("mercadolivre", "Mercado Livre", ["mercadolivre", "mercado_livre"]),
+            ("shopee", "Shopee", ["shopee"]),
+            ("magalu", "Magazine Luiza", ["magalu", "magazineluiza", "magazineluiza"]),
+            ("tiktokshop", "TikTok Shop", ["tiktok"]),
+            ("americanas", "Americanas", ["americanas"]),
+            ("casasbahia", "Casas Bahia", ["casasbahia", "casas bahia"]),
+            ("aliexpress", "AliExpress", ["aliexpress"]),
+            ("shein", "Shein", ["shein"]),
+        ]
+
+        def resolve_marketplace_group(name: str | None, tipo: str | None) -> tuple[str, str]:
+            candidates = [tipo or "", name or ""]
+            for candidate in candidates:
+                normalized = normalize_for_grouping(candidate)
+                if not normalized:
+                    continue
+                for slug, display_name, patterns in GROUP_RULES:
+                    for pattern in patterns:
+                        if pattern in normalized:
+                            return slug, display_name
+            fallback = tipo or name or "Não identificado"
+            fallback_slug = normalize_for_grouping(fallback) or "outro"
+            return fallback_slug, fallback
+
+        grouped: dict[str, dict] = {}
+
+        for row in raw_rows:
+            slug, display_name = resolve_marketplace_group(
+                row["sales_channel_name"], row["sales_channel_tipo"]
+            )
+
+            if slug not in grouped:
+                grouped[slug] = {
+                    "marketplace_slug": slug,
+                    "channel_name": display_name,
+                    "total_orders": 0,
+                    "total_revenue": 0.0,
+                }
+
+            grouped[slug]["total_orders"] += row["order_count"]
+            grouped[slug]["total_revenue"] += row["total_amount"]
 
         total_orders = 0
         total_revenue = 0.0
         marketplace_items: list[MarketplaceRevenueItem] = []
 
-        for row in raw_rows:
-            total_orders += row["order_count"]
-            total_revenue += row["total_amount"]
-
-            channel_name = "Não identificado"
-            marketplace_slug = "desconhecido"
-
-            if row["channel_id"]:
-                normalized = str(row["channel_id"]).lower().strip()
-                channel_name = marketplace_map.get(normalized, str(row["channel_id"]))
-                marketplace_slug = slug_map.get(channel_name, normalized)
-
+        for slug, data in grouped.items():
+            total_orders += data["total_orders"]
+            total_revenue += data["total_revenue"]
             ticket = (
-                round(row["total_amount"] / row["order_count"], 2)
-                if row["order_count"]
+                round(data["total_revenue"] / data["total_orders"], 2)
+                if data["total_orders"]
                 else 0.0
             )
-
             marketplace_items.append(
                 MarketplaceRevenueItem(
-                    channel_id=row["channel_id"],
-                    channel_name=channel_name,
-                    marketplace_slug=marketplace_slug,
-                    total_orders=row["order_count"],
-                    total_revenue=round(row["total_amount"], 2),
+                    channel_id=None,
+                    channel_name=data["channel_name"],
+                    marketplace_slug=data["marketplace_slug"],
+                    total_orders=data["total_orders"],
+                    total_revenue=round(data["total_revenue"], 2),
                     average_ticket=ticket,
                 )
             )
