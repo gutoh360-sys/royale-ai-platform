@@ -28,6 +28,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 COPY --chown=appuser:appuser backend/ ./backend/
 COPY --chown=appuser:appuser alembic.ini .
+COPY --chown=appuser:appuser entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
 USER appuser
 
@@ -36,4 +38,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+ENTRYPOINT ["sh", "entrypoint.sh"]
