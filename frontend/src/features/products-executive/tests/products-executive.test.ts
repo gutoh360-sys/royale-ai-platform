@@ -44,16 +44,16 @@ describe("products page real-data constraints", () => {
     expect(existsSync(resolve(featureRoot, "mocks/index.ts"))).toBe(false);
   });
 
-  it("does not render fake sales calculations while order_items are unavailable", () => {
+  it("keeps catalog KPIs separate from real period sales", () => {
     const pageSource = readFileSync(resolve(featureRoot, "components/products-detail-page.tsx"), "utf8");
 
     expect(pageSource).not.toContain("Receita Total");
     expect(pageSource).not.toContain("Saúde do Portfólio");
     expect(pageSource).not.toContain("Performance por Produto");
     expect(pageSource).toContain("Preço Médio Cadastrado");
-    expect(pageSource).toContain("Receita por Produto");
+    expect(pageSource).toContain("<ProductSalesSection />");
     expect(pageSource).toContain("N/D");
-    expect(pageSource).toContain("Aguardando integração dos itens dos pedidos");
+    expect(pageSource).not.toContain("UnavailableCard");
   });
 
   it("never imports mock products data from the page path", () => {

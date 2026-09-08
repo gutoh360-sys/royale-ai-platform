@@ -12,11 +12,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const auth = "Basic " + btoa(`${ADMIN_USER}:${ADMIN_PASS}`);
 
   try {
-    const res = await fetch(`${BACKEND}/integrations/bling/sync-all`, {
+    const query = body.operation_id ? `?operation_id=${encodeURIComponent(body.operation_id)}` : "";
+    const res = await fetch(`${BACKEND}/integrations/bling/sync-all${query}`, {
       method: "POST",
       headers: { Authorization: auth, "Content-Type": "application/json" },
       body: JSON.stringify(body),

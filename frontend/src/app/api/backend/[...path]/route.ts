@@ -15,7 +15,7 @@ const ALLOWED_GET_PATHS = new Set([
 
 const ALLOWED_QUERY_PARAMS: Record<string, Set<string>> = {
   "analytics/dashboard": new Set(["days", "period"]),
-  "analytics/products": new Set(),
+  "analytics/products": new Set(["period"]),
   "analytics/marketplace-revenue": new Set(["period"]),
   orders: new Set(["status", "period"]),
   products: new Set(),

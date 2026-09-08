@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageTitle } from "@/components/shell/page-title";
+import { runProductBatches, runOrderItemBatches } from "@/services/sync-batches";
+import { invalidateProductSales } from "@/services/product-sales";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -124,7 +126,7 @@ export default function BlingSyncPage() {
 
       if (lockRes.ok) {
         const lockData = await lockRes.json();
-        setLockHeld(!!lockData.held);
+        setLockHeld(!!lockData.locked);
       }
 
       setError(null);
@@ -148,24 +150,20 @@ export default function BlingSyncPage() {
     addLog("Sincronização completa iniciada");
 
     try {
-      const res = await fetch("/api/integrations/sync-all", { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const result: SyncAllResult = await res.json();
-      setSyncAllResult(result);
-
-      for (const phase of result.phases) {
-        const label = PHASE_LABELS[phase.phase] || phase.phase;
-        if (phase.status === "completed") {
-          addLog(`${label}: concluído`, "success");
-        } else if (phase.status === "failed") {
-          addLog(`${label}: falhou — ${phase.error || "erro desconhecido"}`, "error");
-        } else if (phase.status === "skipped") {
-          addLog(`${label}: ignorado`, "warning");
-        }
+      await runProductBatches(addLog);
+      for (const entity of ["orders", "marketplaces"]) {
+        setPhaseProgress(`Sincronizando ${entity}...`);
+        const res = await fetch("/api/integrations/sync-entity", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const result = await res.json();
+        if (result.status !== "completed" || result.items_failed) throw new Error(`Falha em ${entity}`);
       }
-
-      setSync(result.overall_status === "completed" ? "completed" : "error");
+      await runOrderItemBatches(addLog);
+      invalidateProductSales();
+      addLog("Sincronizacao concluida; confira a cobertura dos itens", "success");
+      setSync("completed");
       void fetchStatus();
     } catch (err) {
       setSync("error");
@@ -184,8 +182,17 @@ export default function BlingSyncPage() {
     addLog(`Sincronizando ${PHASE_LABELS[entity] || entity}...`);
 
     try {
-      const res = await fetch(`/api/integrations/sync/${entity}`, { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (entity === "products") {
+        await runProductBatches(addLog);
+      } else {
+        const res = await fetch("/api/integrations/sync-entity", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const result = await res.json();
+        if (result.status !== "completed" || result.items_failed) throw new Error("Sincronizacao parcial");
+      }
+      invalidateProductSales();
       addLog(`${PHASE_LABELS[entity] || entity} concluído`, "success");
       setSync("completed");
       void fetchStatus();
@@ -205,12 +212,7 @@ export default function BlingSyncPage() {
     addLog("Backfill de itens dos pedidos iniciado");
 
     try {
-      const res = await fetch("/api/integrations/backfill-order-items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 100 }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await runOrderItemBatches(addLog);
       addLog("Backfill de itens concluído", "success");
       setSync("completed");
       void fetchStatus();
@@ -310,7 +312,7 @@ export default function BlingSyncPage() {
             count={status.orders_without_channel + (status.orders_count - status.orders_without_channel)}
             subtitle={`${formatNumber(status.orders_without_channel)} pedidos sem canal`}
             lastSync={status.channels_last_synced_at}
-            onSync={() => syncEntity("channels")}
+            onSync={() => syncEntity("marketplaces")}
             disabled={sync === "running"}
           />
         </div>

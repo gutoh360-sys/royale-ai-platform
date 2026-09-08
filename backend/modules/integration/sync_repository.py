@@ -136,8 +136,7 @@ class SyncDataRepository:
     ) -> list[Order]:
         """Find orders that have no OrderItems, ordered deterministically.
 
-        Uses NOT EXISTS for efficient filtering and cursor-based pagination
-        via (ordered_at, external_id) to avoid OFFSET on mutable sets.
+        Uses an immutable primary-key cursor, independent of corrections to ordered_at.
         """
         stmt = (
             select(Order)
@@ -147,32 +146,36 @@ class SyncDataRepository:
                 .correlate(Order)
                 .exists()
             )
-            .order_by(Order.ordered_at, Order.external_id)
+            .order_by(Order.id)
         )
         if after_external_id is not None:
-            cursor_order = (
-                select(Order.ordered_at)
-                .where(Order.external_id == after_external_id)
-                .scalar_subquery()
-            )
-            stmt = stmt.where(
-                (Order.ordered_at > cursor_order)
-                | (
-                    (Order.ordered_at == cursor_order)
-                    & (Order.external_id > after_external_id)
+            if after_external_id.startswith("id:"):
+                cursor_id = UUID(after_external_id[3:])
+            else:
+                # Accept cursors persisted by the previously shipped browser.
+                cursor_id = (
+                    select(Order.id)
+                    .where(Order.external_id == after_external_id)
+                    .order_by(Order.id)
+                    .limit(1)
+                    .scalar_subquery()
                 )
-            )
+            stmt = stmt.where(Order.id > cursor_id)
         stmt = stmt.limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def count_orders_without_items(self) -> int:
         """Count total orders that have no OrderItems."""
-        stmt = select(func.count()).select_from(Order).where(
-            ~select(OrderItem.id)
-            .where(OrderItem.order_id == Order.id)
-            .correlate(Order)
-            .exists()
+        stmt = (
+            select(func.count())
+            .select_from(Order)
+            .where(
+                ~select(OrderItem.id)
+                .where(OrderItem.order_id == Order.id)
+                .correlate(Order)
+                .exists()
+            )
         )
         result = await self._session.execute(stmt)
         return result.scalar() or 0

@@ -24,6 +24,10 @@ class AnalyticsDashboardResponse(BaseModel):
 
 
 class ProductPerformanceItem(BaseModel):
+    quantity: int = 0
+    margin: float | None = None
+    cost_coverage: float | None = None
+    growth: float | None = None
     id: str
     sku: str
     name: str
@@ -55,6 +59,16 @@ class MarketplaceRevenueResponse(BaseModel):
 
 
 class ProductAnalyticsResponse(BaseModel):
+    period: str = "30d"
+    quantity: int = 0
+    cost_coverage: float | None = None
+    growth: float | None = None
+    eligible_orders: int = 0
+    orders_with_items: int = 0
+    coverage: float | None = None
+    top_sku: str | None = None
+    top10: list[ProductPerformanceItem] = []
+    sold_out: list[ProductPerformanceItem] = []
     products: list[ProductPerformanceItem]
     total_products: int
     total_revenue: float

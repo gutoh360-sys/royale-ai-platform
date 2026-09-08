@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProductsDetailHeader } from "./products-detail-header";
 import { ProductsDetailSkeleton } from "./products-detail-skeleton";
+import { ProductSalesSection } from "./product-sales-section";
 import { useProductsData } from "@/features/products-executive/hooks/use-products-data";
 import type { CountDistributionItem } from "@/features/products-executive/types";
 import {
@@ -19,8 +20,6 @@ import {
   type ProductStockFilter,
 } from "@/features/products-executive/utils/catalog-view";
 
-const SALES_UNAVAILABLE_TEXT = "Aguardando integração dos itens dos pedidos";
-
 export function ProductsDetailPage() {
   const {
     products,
@@ -30,6 +29,7 @@ export function ProductsDetailPage() {
     statusDistribution,
     summary,
     status,
+    retry,
   } = useProductsData();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProductStatusFilter>("all");
@@ -72,6 +72,7 @@ export function ProductsDetailPage() {
         <div className="flex min-h-[400px] items-center justify-center gap-2">
           <AlertCircle className="size-5 text-destructive" />
           <p className="text-sm text-muted-foreground">Erro ao carregar dados reais de produtos</p>
+          <Button variant="outline" onClick={retry}>Tentar novamente</Button>
         </div>
       </ContentContainer>
     );
@@ -97,7 +98,7 @@ export function ProductsDetailPage() {
           <CardContent className="space-y-2 p-5">
             <p className="text-sm font-medium">Catálogo sincronizado com o Bling</p>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Indicadores de vendas por produto serão habilitados após a conclusão da vinculação dos itens dos pedidos.
+              Vendas calculadas a partir dos itens vinculados aos pedidos. A cobertura indica quanto do período já foi integrado.
             </p>
           </CardContent>
         </Card>
@@ -118,17 +119,7 @@ export function ProductsDetailPage() {
           </div>
         </section>
 
-        <section aria-label="Indicadores de vendas indisponíveis">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-            Vendas por Produto
-          </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <UnavailableCard label="Receita por Produto" />
-            <UnavailableCard label="Margem Média" />
-            <UnavailableCard label="Crescimento" />
-            <UnavailableCard label="Top SKU" />
-          </div>
-        </section>
+        <ProductSalesSection />
 
         <section aria-label="Gráficos reais do catálogo">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
@@ -250,18 +241,6 @@ function KpiCard({ label, value }: { label: string; value: string }) {
       <CardContent className="p-4">
         <p className="mb-1 text-[11px] text-muted-foreground">{label}</p>
         <p className="font-heading text-lg font-semibold tracking-tight">{value}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function UnavailableCard({ label }: { label: string }) {
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="mb-1 text-[11px] text-muted-foreground">{label}</p>
-        <p className="font-heading text-lg font-semibold tracking-tight">N/D</p>
-        <p className="mt-1 text-[11px] text-muted-foreground">{SALES_UNAVAILABLE_TEXT}</p>
       </CardContent>
     </Card>
   );

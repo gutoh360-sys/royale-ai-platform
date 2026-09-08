@@ -56,11 +56,13 @@ class BackfillOrdersResponse(BaseModel):
 
 
 class BackfillOrderItemsRequest(BaseModel):
+    operation_id: str | None = None
     limit: int = 50
     after_external_id: str | None = None
 
 
 class BackfillOrderItemsResponse(BaseModel):
+    operation_id: str | None = None
     selected: int
     processed: int
     orders_enriched: int
@@ -77,9 +79,11 @@ class BackfillOrderItemsResponse(BaseModel):
 class SyncProductsBatchRequest(BaseModel):
     start_page: int = 1
     pages: int = 5
+    operation_id: str | None = None
 
 
 class SyncProductsBatchResponse(BaseModel):
+    operation_id: str | None = None
     start_page: int
     end_page: int
     pages_processed: int
@@ -153,6 +157,8 @@ class SyncAllReconciliationResponse(BaseModel):
 
 
 class SyncAllResponse(BaseModel):
+    order_items_batch: BackfillOrderItemsResponse | None = None
+    product_batch: SyncProductsBatchResponse | None = None
     overall_status: str
     phases: list[SyncAllPhaseResponse]
     reconciliation: SyncAllReconciliationResponse

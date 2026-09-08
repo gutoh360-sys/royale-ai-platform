@@ -1,5 +1,3 @@
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.core.security.deps import require_admin_auth
@@ -134,13 +132,22 @@ async def test_connection(
 
 @router.post(
     "/sync/{entity}",
-    response_model=SyncTriggerResponse,
+    response_model=SyncTriggerResponse | SyncProductsBatchResponse,
     dependencies=[Depends(require_admin_auth)],
 )
 async def trigger_sync(
     entity: str,
     service: BlingSyncService = Depends(get_bling_sync_service),
-) -> SyncTriggerResponse:
+    checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository),
+    operation_id: str | None = Query(default=None),
+) -> SyncTriggerResponse | SyncProductsBatchResponse:
+    if entity == "products":
+        from dataclasses import asdict
+
+        return SyncProductsBatchResponse(
+            **asdict(await service.sync_product_request(checkpoint_repo, operation_id))
+        )
+    await checkpoint_repo.acquire_guard()
     if entity not in ("products", "orders", "marketplaces", "product_channels", "listings"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -181,20 +188,29 @@ async def trigger_sync(
 async def sync_all(
     service: BlingSyncService = Depends(get_bling_sync_service),
     checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository),
+    operation_id: str | None = Query(default=None),
 ) -> SyncAllResponse:
-    lock = SyncLock("all")
+    lock = SyncLock("sync")
     if not await lock.acquire():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Sincronização em andamento. Aguarde a conclusão.",
         )
     try:
-        result = await service.sync_all(checkpoint_repo=checkpoint_repo)
+        result = await service.sync_all(checkpoint_repo=checkpoint_repo, operation_id=operation_id)
     except OAuthPermanentError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     finally:
         await lock.release()
+    from dataclasses import asdict
+
     return SyncAllResponse(
+        order_items_batch=BackfillOrderItemsResponse(**asdict(result.order_items_batch))
+        if result.order_items_batch
+        else None,
+        product_batch=SyncProductsBatchResponse(**asdict(result.product_batch))
+        if result.product_batch
+        else None,
         overall_status=result.overall_status,
         phases=[
             SyncAllPhaseResponse(
@@ -266,6 +282,7 @@ async def backfill_orders(
 async def backfill_order_items(
     body: BackfillOrderItemsRequest,
     service: BlingSyncService = Depends(get_bling_sync_service),
+    checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository),
 ) -> BackfillOrderItemsResponse:
     if body.limit < 1 or body.limit > 100:
         raise HTTPException(
@@ -280,15 +297,18 @@ async def backfill_order_items(
             detail="Sincronização em andamento. Aguarde a conclusão.",
         )
     try:
-        result = await service.backfill_order_items(
+        result = await service.backfill_order_item_request(
+            checkpoint_repo,
+            operation_id=body.operation_id,
             limit=body.limit,
-            after_external_id=body.after_external_id,
+            cursor=body.after_external_id,
         )
     except OAuthPermanentError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     finally:
         await lock.release()
     return BackfillOrderItemsResponse(
+        operation_id=result.operation_id,
         selected=result.selected,
         processed=result.processed,
         orders_enriched=result.orders_enriched,
@@ -318,10 +338,10 @@ async def sync_products_batch(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="start_page must be >= 1",
         )
-    if body.pages < 1 or body.pages > 10:
+    if body.pages < 1 or body.pages > 5:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="pages must be between 1 and 10",
+            detail="pages must be between 1 and 5",
         )
 
     lock = SyncLock("sync")
@@ -332,60 +352,12 @@ async def sync_products_batch(
         )
 
     try:
-        existing = await checkpoint_repo.get("products")
-        start_page = body.start_page
-        if existing and existing.status == "running" and start_page == 1:
-            start_page = existing.current_page
-
-        try:
-            result = await service.sync_products_batch(
-                start_page=start_page,
-                pages=body.pages,
-            )
-        except OAuthPermanentError as exc:
-            await checkpoint_repo.upsert(
-                "products",
-                status="failed",
-                error_message=str(exc),
-            )
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-        if result.natural_end:
-            await checkpoint_repo.upsert(
-                "products",
-                current_page=start_page,
-                last_completed_page=result.end_page,
-                status="completed",
-                totals={
-                    "fetched": result.fetched,
-                    "processed": result.processed,
-                    "created": result.created,
-                    "updated": result.updated,
-                    "skipped": result.skipped,
-                    "failed": result.failed,
-                },
-                finished_at=datetime.now(UTC),
-            )
-        else:
-            await checkpoint_repo.upsert(
-                "products",
-                current_page=result.next_page or start_page,
-                last_completed_page=result.end_page,
-                status="running",
-                totals={
-                    "fetched": result.fetched,
-                    "processed": result.processed,
-                    "created": result.created,
-                    "updated": result.updated,
-                    "skipped": result.skipped,
-                    "failed": result.failed,
-                },
-                started_at=existing.started_at if existing else datetime.now(UTC),
-            )
+        result = await service.sync_product_request(checkpoint_repo, body.operation_id, body.pages)
     finally:
         await lock.release()
 
     return SyncProductsBatchResponse(
+        operation_id=result.operation_id,
         start_page=result.start_page,
         end_page=result.end_page,
         pages_processed=result.pages_processed,

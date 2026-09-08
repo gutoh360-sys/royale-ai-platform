@@ -25,7 +25,8 @@ export async function POST(request: NextRequest) {
   const auth = "Basic " + btoa(`${ADMIN_USER}:${ADMIN_PASS}`);
 
   try {
-    const res = await fetch(`${BACKEND}/integrations/bling/sync/${entity}`, {
+    const query = body.operation_id ? `?operation_id=${encodeURIComponent(body.operation_id)}` : "";
+    const res = await fetch(`${BACKEND}/integrations/bling/sync/${entity}${query}`, {
       method: "POST",
       headers: { Authorization: auth, "Content-Type": "application/json" },
       body: JSON.stringify(body),

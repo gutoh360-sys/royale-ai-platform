@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 
-from backend.core.period import VALID_PERIODS
+from backend.core.period import Period
 from backend.core.security.deps import require_admin_auth
 from backend.modules.analytics.di import get_analytics_service
 from backend.modules.analytics.schemas import (
@@ -35,9 +35,10 @@ async def get_dashboard(
     dependencies=[Depends(require_admin_auth)],
 )
 async def get_product_analytics(
+    period: Period = Query(default="30d"),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> ProductAnalyticsResponse:
-    return await service.get_product_analytics()
+    return await service.get_product_analytics(period=period)
 
 
 @router.get(

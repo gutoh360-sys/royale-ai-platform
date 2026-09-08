@@ -248,14 +248,23 @@ class BlingApiClient:
         }
         response = await self.get_authenticated("/produtos", token_provider, params)
         if response.status_code != 200:
-            raise ApiError(
-                f"fetch products page {page} failed with status {response.status_code}"
-            )
+            raise ApiError(f"fetch products page {page} failed with status {response.status_code}")
         body = response.json()
         payload = body.get("data")
         if isinstance(payload, list):
             return cast(list[dict[str, Any]], payload)
-        return []
+        raise ApiError("Product page response did not contain a data list")
+
+    async def fetch_product(
+        self, token_provider: Callable[[], Awaitable[str]], *, product_id: str
+    ) -> dict[str, Any] | None:
+        response = await self.get_authenticated(f"/produtos/{product_id}", token_provider)
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise ApiError(f"product detail failed with status {response.status_code}")
+        payload = response.json().get("data")
+        return payload if isinstance(payload, dict) else None
 
     async def fetch_categories(
         self,
@@ -367,9 +376,7 @@ class BlingApiClient:
 
         Returns the order dict on 200, None on 404, raises ApiError otherwise.
         """
-        response = await self.get_authenticated(
-            f"/pedidos/vendas/{order_id}", token_provider
-        )
+        response = await self.get_authenticated(f"/pedidos/vendas/{order_id}", token_provider)
         if response.status_code == 404:
             return None
         if response.status_code != 200:

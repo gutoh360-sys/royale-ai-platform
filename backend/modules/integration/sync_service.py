@@ -18,13 +18,13 @@ from backend.database.models.product import Product
 from backend.database.models.product_channel import ProductChannel
 from backend.database.models.sales_channel import SalesChannel
 from backend.database.models.sync import SyncError, SyncLog
+from backend.modules.integration.checkpoint import CheckpointRepository
 from backend.modules.integration.client import BlingApiClient
 from backend.modules.integration.errors import ApiError
-from backend.modules.integration.checkpoint import CheckpointRepository
 from backend.modules.integration.sync_repository import ISyncLogRepository, SyncDataRepository
 
 if TYPE_CHECKING:
-    from backend.modules.integration.schemas import SyncCheckpointSummary, SyncStatusResponse
+    from backend.modules.integration.schemas import SyncStatusResponse
 
 TokenProvider = Callable[[], Awaitable[str]]
 
@@ -120,6 +120,8 @@ class SyncAllResult:
     overall_status: str
     phases: list[SyncAllPhaseResult]
     reconciliation: SyncAllReconciliation
+    product_batch: SyncProductsBatchResult | None = None
+    order_items_batch: BackfillOrderItemsResult | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +137,7 @@ class BackfillOrderItemsResult:
     remaining_without_items: int
     next_cursor: str | None
     has_more: bool
+    operation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,7 @@ class SyncProductsBatchResult:
     has_more: bool
     natural_end: bool
     skip_reasons: dict[str, int]
+    operation_id: str | None = None
 
 
 class IncompleteSyncItemError(Exception):
@@ -228,40 +232,19 @@ class BlingSyncService:
         raise ValueError(f"Unsupported entity: {entity}")
 
     async def sync_products(self, sync_type: str = "full") -> SyncResult:
-        batch_pages = self._settings.BLING_PRODUCT_SYNC_BATCH_PAGES
-        safety_max = self._settings.BLING_PRODUCT_SYNC_MAX_PAGES
-        total_fetched = total_processed = total_created = total_updated = total_skipped = total_failed = 0
-        current_page = 1
-        pages_done = 0
-
-        while pages_done < safety_max:
-            batch_result = await self.sync_products_batch(
-                start_page=current_page,
-                pages=batch_pages,
-                page_size=self._settings.BLING_SYNC_PAGE_SIZE,
-            )
-            total_fetched += batch_result.fetched
-            total_processed += batch_result.processed
-            total_created += batch_result.created
-            total_updated += batch_result.updated
-            total_skipped += batch_result.skipped
-            total_failed += batch_result.failed
-            pages_done += batch_result.pages_processed
-
-            if batch_result.natural_end or not batch_result.has_more:
-                break
-
-            current_page = batch_result.next_page or (current_page + batch_result.pages_processed)
-
+        batch = await self.sync_products_batch(
+            pages=min(5, self._settings.BLING_PRODUCT_SYNC_BATCH_PAGES),
+            page_size=self._settings.BLING_SYNC_PAGE_SIZE,
+        )
         return SyncResult(
             entity="products",
             sync_type=sync_type,
-            status="completed",
-            items_processed=total_processed,
-            items_created=total_created,
-            items_updated=total_updated,
-            items_failed=total_failed,
-            items_skipped=total_skipped,
+            status="failed" if batch.failed else "running" if batch.has_more else "completed",
+            items_processed=batch.processed,
+            items_created=batch.created,
+            items_updated=batch.updated,
+            items_failed=batch.failed,
+            items_skipped=batch.skipped,
         )
 
     async def sync_products_batch(
@@ -271,10 +254,13 @@ class BlingSyncService:
         pages: int = 5,
         page_size: int = 100,
     ) -> SyncProductsBatchResult:
+        if not 1 <= pages <= 5 or start_page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("Invalid product batch bounds")
         skip_reasons: dict[str, int] = {}
         processed = created = updated = skipped = failed = fetched = 0
         current_page = start_page
         natural_end = False
+        actual_pages = 0
 
         for _ in range(pages):
             try:
@@ -291,6 +277,7 @@ class BlingSyncService:
                 break
 
             fetched += len(items)
+            failures_before_page = failed
 
             if len(items) < page_size:
                 natural_end = True
@@ -324,15 +311,17 @@ class BlingSyncService:
                 elif outcome == "updated":
                     updated += 1
 
+            if failed > failures_before_page:
+                natural_end = False
+                break
+            actual_pages += 1
+            current_page += 1
             if natural_end:
                 break
 
-            current_page += 1
-
         has_more = not natural_end
-        last_processed_page = current_page - 1 if has_more else current_page
+        last_processed_page = current_page - 1
         next_page = current_page if has_more else None
-        actual_pages = (current_page - start_page) if natural_end else pages
 
         return SyncProductsBatchResult(
             start_page=start_page,
@@ -350,6 +339,48 @@ class BlingSyncService:
             skip_reasons=skip_reasons,
         )
 
+    async def sync_product_request(
+        self, checkpoint_repo: CheckpointRepository, operation_id: str | None = None, pages: int = 5
+    ) -> SyncProductsBatchResult:
+        from dataclasses import replace
+
+        cp = await checkpoint_repo.claim_products(operation_id)
+        owner = cp.totals["operation_id"]
+        if cp.status == "completed":
+            return SyncProductsBatchResult(
+                cp.current_page,
+                cp.last_completed_page,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                None,
+                False,
+                True,
+                {},
+                owner,
+            )
+        result = await self.sync_products_batch(start_page=cp.current_page, pages=pages)
+        totals = dict(cp.totals)
+        for key in ("fetched", "processed", "created", "updated", "skipped", "failed"):
+            totals[key] = totals.get(key, 0) + getattr(result, key)
+        totals["expires_at"] = (self._now() + timedelta(minutes=10)).isoformat()
+        await checkpoint_repo.upsert(
+            "products",
+            current_page=result.next_page or result.end_page,
+            last_completed_page=result.end_page,
+            totals=totals,
+            status="failed" if result.failed else "completed" if result.natural_end else "running",
+            finished_at=self._now() if result.natural_end else None,
+            error_message="Product batch failures; retry from checkpoint"
+            if result.failed
+            else None,
+        )
+        return replace(result, operation_id=owner)
+
     @staticmethod
     def _classify_skip_reason(reason: str) -> str:
         lower = reason.lower()
@@ -364,7 +395,7 @@ class BlingSyncService:
     async def get_sync_status(
         self,
         checkpoint_repo: CheckpointRepository | None = None,
-    ) -> "SyncStatusResponse":
+    ) -> SyncStatusResponse:
         from sqlalchemy import func, select
 
         from backend.database.models.order import Order, OrderItem
@@ -378,15 +409,11 @@ class BlingSyncService:
         order_items_count = (await session.execute(select(func.count(OrderItem.id)))).scalar() or 0
         orders_without_items = await self._data_repo.count_orders_without_items()
         orders_without_channel = (
-            await session.execute(
-                select(func.count(Order.id)).where(Order.channel_id.is_(None))
-            )
+            await session.execute(select(func.count(Order.id)).where(Order.channel_id.is_(None)))
         ).scalar() or 0
 
         zero_stock = (
-            await session.execute(
-                select(func.count(Product.id)).where(Product.stock_quantity == 0)
-            )
+            await session.execute(select(func.count(Product.id)).where(Product.stock_quantity == 0))
         ).scalar() or 0
 
         products_last_synced_at = (
@@ -486,7 +513,9 @@ class BlingSyncService:
                 )
         return items
 
-    async def sync_all(self, checkpoint_repo: CheckpointRepository | None = None) -> SyncAllResult:
+    async def sync_all(
+        self, checkpoint_repo: CheckpointRepository | None = None, operation_id: str | None = None
+    ) -> SyncAllResult:
         from sqlalchemy import func, select
 
         from backend.database.models.order import Order, OrderItem
@@ -496,15 +525,49 @@ class BlingSyncService:
         overall_status = "completed"
         session = self._data_repo.session
 
+        product_batch = (
+            await self.sync_product_request(checkpoint_repo, operation_id)
+            if checkpoint_repo
+            else None
+        )
+        order_items_batch = None
+
         phase_defs = [
             ("products", lambda: self.sync_products(sync_type="full")),
             ("orders", lambda: self.sync_orders()),
             ("channels", lambda: self.sync_marketplaces()),
-            ("order_items", lambda: self.backfill_order_items(limit=100)),
+            (
+                "order_items",
+                lambda: (
+                    self.backfill_order_item_request(checkpoint_repo, operation_id)
+                    if checkpoint_repo
+                    else self.backfill_order_items(limit=100)
+                ),
+            ),
         ]
+        if product_batch is not None:
+            phases.append(
+                SyncAllPhaseResult(
+                    phase="products",
+                    status="failed"
+                    if product_batch.failed
+                    else "running"
+                    if product_batch.has_more
+                    else "completed",
+                    items_processed=product_batch.processed,
+                    items_created=product_batch.created,
+                    items_updated=product_batch.updated,
+                    items_failed=product_batch.failed,
+                )
+            )
+            phase_defs = (
+                phase_defs[1:] if not product_batch.has_more and not product_batch.failed else []
+            )
+            if product_batch.has_more or product_batch.failed:
+                overall_status = "partial"
 
         for phase_name, phase_fn in phase_defs:
-            if checkpoint_repo is not None:
+            if checkpoint_repo is not None and phase_name != "order_items":
                 await checkpoint_repo.upsert(
                     phase_name,
                     status="running",
@@ -512,6 +575,21 @@ class BlingSyncService:
                 )
             try:
                 result = await phase_fn()
+                if isinstance(result, BackfillOrderItemsResult):
+                    order_items_batch = result
+                    result = SyncResult(
+                        "order_items",
+                        "backfill",
+                        "failed"
+                        if result.failed
+                        else "running"
+                        if result.has_more
+                        else "completed",
+                        result.processed,
+                        result.items_created,
+                        result.orders_enriched,
+                        result.failed,
+                    )
                 phase_result = SyncAllPhaseResult(
                     phase=phase_name,
                     status=result.status,
@@ -536,7 +614,9 @@ class BlingSyncService:
                     cause=exc,
                 )
 
-            if checkpoint_repo is not None:
+            if phase_result.status != "completed":
+                overall_status = "partial"
+            if checkpoint_repo is not None and phase_name != "order_items":
                 await checkpoint_repo.upsert(
                     phase_name,
                     status=phase_result.status,
@@ -546,12 +626,8 @@ class BlingSyncService:
             phases.append(phase_result)
 
         try:
-            products_count = (
-                await session.execute(select(func.count(Product.id)))
-            ).scalar() or 0
-            orders_count = (
-                await session.execute(select(func.count(Order.id)))
-            ).scalar() or 0
+            products_count = (await session.execute(select(func.count(Product.id)))).scalar() or 0
+            orders_count = (await session.execute(select(func.count(Order.id)))).scalar() or 0
             order_items_count = (
                 await session.execute(select(func.count(OrderItem.id)))
             ).scalar() or 0
@@ -588,6 +664,8 @@ class BlingSyncService:
             overall_status=overall_status,
             phases=phases,
             reconciliation=reconciliation,
+            product_batch=product_batch,
+            order_items_batch=order_items_batch,
         )
 
     async def sync_orders(self) -> SyncResult:
@@ -632,9 +710,7 @@ class BlingSyncService:
             eligible += 1
 
             try:
-                raw = await self._client.fetch_order(
-                    self._token_provider, order_id=eid
-                )
+                raw = await self._client.fetch_order(self._token_provider, order_id=eid)
             except Exception as exc:
                 failed += 1
                 self._log_failure_safely(
@@ -698,6 +774,45 @@ class BlingSyncService:
             failed=failed,
         )
 
+    async def backfill_order_item_request(
+        self,
+        checkpoint_repo: CheckpointRepository,
+        operation_id: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> BackfillOrderItemsResult:
+        from dataclasses import asdict, replace
+
+        cp = await checkpoint_repo.claim_operation("order_items", operation_id)
+        if cp.status == "completed" and cp.totals.get("last_result"):
+            return BackfillOrderItemsResult(**cp.totals["last_result"])
+        result = await self.backfill_order_items(limit, cp.totals.get("cursor", cursor))
+        result = replace(result, operation_id=cp.totals["operation_id"])
+        totals = dict(cp.totals)
+        for key in (
+            "selected",
+            "processed",
+            "orders_enriched",
+            "items_created",
+            "unknown_products",
+            "detail_without_items",
+            "not_found",
+            "failed",
+        ):
+            totals[key] = totals.get(key, 0) + getattr(result, key)
+        totals["remaining_without_items"] = result.remaining_without_items
+        if not result.failed:
+            totals["cursor"] = result.next_cursor
+        totals["last_result"] = asdict(result)
+        totals["expires_at"] = (self._now() + timedelta(minutes=10)).isoformat()
+        await checkpoint_repo.upsert(
+            "order_items",
+            totals=totals,
+            status="failed" if result.failed else "running" if result.has_more else "completed",
+            finished_at=self._now() if not result.has_more and not result.failed else None,
+        )
+        return result
+
     async def backfill_order_items(
         self, limit: int = 50, after_external_id: str | None = None
     ) -> BackfillOrderItemsResult:
@@ -709,6 +824,8 @@ class BlingSyncService:
 
         Fetches limit+1 to accurately determine has_more without false positives.
         """
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
         # Fetch one extra to detect if there are more records
         raw_orders = await self._data_repo.find_orders_without_items(
             limit=limit + 1, after_external_id=after_external_id
@@ -760,16 +877,14 @@ class BlingSyncService:
                 )
                 continue
             finally:
+                unknown_products += sum(
+                    "product not found" in reason for _, reason in self._deferred_item_errors
+                )
                 await self._record_deferred_item_errors()
 
             processed += 1
 
-        # Count unknown product errors from this batch
-        unknown_products = len(
-            [e for e in self._deferred_item_errors if "product not found" in e[1]]
-        )
-
-        next_cursor = orders[-1].external_id if orders else None
+        next_cursor = f"id:{orders[-1].id}" if orders else None
         remaining_without_items = await self._data_repo.count_orders_without_items()
 
         return BackfillOrderItemsResult(
@@ -1257,9 +1372,7 @@ class BlingSyncService:
         # Existing orders without items are handled by backfill-order-items.
         if action == "created" and not items:
             try:
-                detail = await self._client.fetch_order(
-                    self._token_provider, order_id=external_id
-                )
+                detail = await self._client.fetch_order(self._token_provider, order_id=external_id)
                 if detail is not None:
                     detail_items = detail.get("itens") or []
                     if isinstance(detail_items, list) and detail_items:
@@ -1294,11 +1407,24 @@ class BlingSyncService:
         product = await self._data_repo.find_product_by_sku(sku) if sku else None
         if product is None and bling_id:
             product = await self._data_repo.find_product_by_bling_id(bling_id)
+        if product is None and bling_id:
+            detail = await self._client.fetch_product(self._token_provider, product_id=bling_id)
+            if detail is not None and str(detail.get("id")) == bling_id:
+                await self._upsert_product(detail)
+                product = await self._data_repo.find_product_by_bling_id(bling_id)
         if product is None:
             raise OrderItemUnknownProductError(
                 f"order item product not found for sku={sku or bling_id}"
             )
-        product_name = str(raw.get("descricao") or raw.get("produto", {}).get("nome") or "")
+        existing = await self._data_repo.find_order_item(order.id, sku or product.sku)
+        if existing is not None:
+            await self._update_item(existing, raw)
+            return
+        product_name = str(
+            raw.get("descricao")
+            or (product_field.get("nome") if isinstance(product_field, dict) else "")
+            or ""
+        )
         unit_price = decimal_of(raw.get("valor"))
         quantity = int(raw.get("quantidade") or 1)
         discount = decimal_of(raw.get("desconto"))
@@ -1309,9 +1435,15 @@ class BlingSyncService:
             product_name=product_name or product.name,
             quantity=quantity,
             unit_price=unit_price,
-            total_price=float(unit_price * quantity - discount),
+            total_price=float(
+                decimal_of(raw["total"])
+                if raw.get("total") is not None
+                else unit_price * quantity - discount
+            ),
         )
+        order.items.append(item)
         self._data_repo.session.add(item)
+        await self._data_repo.session.flush()
 
     async def _update_item(self, item: OrderItem, raw: dict[str, Any]) -> None:
         item.quantity = int(raw.get("quantidade") or item.quantity)
@@ -1319,6 +1451,10 @@ class BlingSyncService:
             item.unit_price = float(raw["valor"])
         if raw.get("total") is not None:
             item.total_price = float(raw["total"])
+        elif raw.get("valor") is not None:
+            item.total_price = float(
+                decimal_of(item.unit_price) * item.quantity - decimal_of(raw.get("desconto"))
+            )
 
     _BLING_VALOR_TO_STATUS: dict[int, str] = {
         0: "pending",

@@ -44,47 +44,54 @@ class AnalyticsService:
             period=period,
         )
 
-    async def get_product_analytics(self) -> ProductAnalyticsResponse:
-        rows = await self._repository.product_performance()
-
+    async def get_product_analytics(self, period: str = "30d") -> ProductAnalyticsResponse:
+        start, end = period_to_range(parse_period(period), BUSINESS_TZ)
+        current = await self._repository.product_sales(start, end)
+        previous = await self._repository.product_sales(start - (end - start), start)
+        previous_revenues = {str(row["id"]): row["total_revenue"] for row in previous["products"]}
         products = []
-        for row in rows:
-            price = row["price"]
-            cost = row["cost"]
-            revenue = row["total_revenue"]
-            products.append(
-                ProductPerformanceItem(
-                    id=row["id"],
-                    sku=row["sku"],
-                    name=row["name"],
-                    brand=row["brand"],
-                    category_id=row["category_id"],
-                    category_name=row["category_name"],
-                    price=price,
-                    cost=cost,
-                    stock_quantity=row["stock_quantity"],
-                    active=row["active"],
-                    total_revenue=revenue,
-                    order_count=row["order_count"],
-                )
+        costed_revenue = total_cost = total_revenue = Decimal(0)
+        for row in current["products"]:
+            row = dict(row)
+            revenue = Decimal(str(row["total_revenue"]))
+            covered = Decimal(str(row.pop("costed_revenue")))
+            cost = Decimal(str(row.pop("total_cost")))
+            prior = Decimal(str(previous_revenues.get(str(row["id"]), 0)))
+            row.update(
+                id=str(row["id"]),
+                category_id=str(row["category_id"]),
+                margin=float((covered - cost) / covered * 100) if covered else None,
+                cost_coverage=float(covered / revenue) if revenue else None,
+                growth=float((revenue - prior) / prior * 100) if prior else None,
             )
-
-        total_revenue = sum(p.total_revenue for p in products)
-        total_orders = sum(p.order_count for p in products)
-
-        margins = [
-            (p.price - p.cost) / p.price * 100
-            for p in products
-            if p.cost and p.cost > 0 and p.price > 0
-        ]
-        average_margin = round(sum(margins) / len(margins), 2) if margins else None
-
+            products.append(ProductPerformanceItem(**row))
+            costed_revenue += covered
+            total_cost += cost
+            total_revenue += revenue
+        prior_total = sum(
+            (Decimal(str(row["total_revenue"])) for row in previous["products"]), Decimal(0)
+        )
+        eligible, with_items = current["eligible_orders"], current["orders_with_items"]
         return ProductAnalyticsResponse(
             products=products,
             total_products=len(products),
-            total_revenue=total_revenue,
-            total_orders=total_orders,
-            average_margin=average_margin,
+            period=period,
+            total_revenue=float(total_revenue),
+            total_orders=with_items,
+            quantity=sum(p.quantity for p in products),
+            average_margin=float((costed_revenue - total_cost) / costed_revenue * 100)
+            if costed_revenue
+            else None,
+            cost_coverage=float(costed_revenue / total_revenue) if total_revenue else None,
+            growth=float((total_revenue - prior_total) / prior_total * 100)
+            if prior_total
+            else None,
+            eligible_orders=eligible,
+            orders_with_items=with_items,
+            coverage=with_items / eligible if eligible else None,
+            top_sku=products[0].sku if products else None,
+            top10=products[:10],
+            sold_out=[p for p in products if p.stock_quantity <= 0][:10],
         )
 
     async def get_marketplace_revenue(self, period: str = "30d") -> MarketplaceRevenueResponse:
@@ -95,6 +102,7 @@ class AnalyticsService:
 
         def normalize_for_grouping(value: str) -> str:
             import unicodedata
+
             value = value.strip().lower()
             value = unicodedata.normalize("NFD", value)
             value = "".join(c for c in value if unicodedata.category(c) != "Mn")

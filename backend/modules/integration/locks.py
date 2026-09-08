@@ -1,10 +1,12 @@
 """Redis-based distributed lock for sync operations."""
+
 from __future__ import annotations
 
 import uuid
 
 from redis.asyncio import Redis
 
+from backend.core.config import get_settings
 from backend.core.di import get_redis_client
 
 LOCK_KEY_PREFIX = "royale:sync:lock:"
@@ -19,7 +21,7 @@ class SyncLock:
         self._redis: Redis | None = None
 
     async def acquire(self) -> bool:
-        self._redis = get_redis_client()
+        self._redis = get_redis_client(get_settings())
         result = await self._redis.set(self.key, self.owner, nx=True, ex=LOCK_TTL_SECONDS)
         return result is not None
 
@@ -37,5 +39,5 @@ class SyncLock:
         return result == 1
 
     async def is_locked(self) -> bool:
-        client = get_redis_client()
+        client = get_redis_client(get_settings())
         return await client.exists(self.key) > 0
