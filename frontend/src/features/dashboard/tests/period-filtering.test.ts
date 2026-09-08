@@ -17,8 +17,8 @@ const dashboardLayoutSource = readFileSync(
 );
 
 describe("Dashboard period filtering", () => {
-  it("sends period=7d when 7d selected", () => {
-    expect(dashboardPageSource).toContain('useState<Period>("7d")');
+  it("defaults to 30d period", () => {
+    expect(dashboardPageSource).toContain('useState<Period>("30d")');
     expect(dashboardPageSource).toContain("useExecutiveCommandCenter(period)");
     expect(dashboardPageSource).toContain("useMarketplaceData(period)");
     expect(dashboardPageSource).toContain("useProductsData()");

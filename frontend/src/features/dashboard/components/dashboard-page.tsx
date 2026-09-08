@@ -11,7 +11,7 @@ import { ExecutiveRecommendation } from "@/features/dashboard/executive-command-
 import type { Period } from "@/lib/period";
 
 export function DashboardPage() {
-  const [period, setPeriod] = useState<Period>("7d");
+  const [period, setPeriod] = useState<Period>("30d");
 
   const { data: cc, status: ccStatus } = useExecutiveCommandCenter(period);
   const { summary: mpSummary, marketplaces, status: mpStatus } = useMarketplaceData(period);
@@ -98,7 +98,7 @@ export function DashboardPage() {
           </div>
         </section>
 
-        {topMarketplaces.length > 0 && (
+        {mpStatus === "success" && topMarketplaces.length > 0 && (
           <section aria-label="Performance por marketplace">
             <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
               Performance por Marketplace
@@ -120,6 +120,24 @@ export function DashboardPage() {
                 </Card>
               ))}
             </div>
+          </section>
+        )}
+
+        {mpStatus === "success" && topMarketplaces.length === 0 && (
+          <section aria-label="Performance por marketplace">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-3">
+              Performance por Marketplace
+            </h2>
+            <Card>
+              <CardContent className="p-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma venda encontrada neste período.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Selecione um período maior para visualizar o desempenho dos canais.
+                </p>
+              </CardContent>
+            </Card>
           </section>
         )}
 

@@ -5,7 +5,7 @@ import type { CommandCenterResult } from "@/features/dashboard/executive-command
 import { fetchCommandCenterData } from "@/services/api-command-center";
 import type { Period } from "@/lib/period";
 
-export function useExecutiveCommandCenter(period: Period = "7d"): CommandCenterResult {
+export function useExecutiveCommandCenter(period: Period = "30d"): CommandCenterResult {
   const [result, setResult] = useState<CommandCenterResult>({
     data: {
       status: { healthScore: 0, label: "", summary: "" },
