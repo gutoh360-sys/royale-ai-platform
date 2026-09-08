@@ -228,13 +228,40 @@ class BlingSyncService:
         raise ValueError(f"Unsupported entity: {entity}")
 
     async def sync_products(self, sync_type: str = "full") -> SyncResult:
-        return await self._run_sync(
+        batch_pages = self._settings.BLING_PRODUCT_SYNC_BATCH_PAGES
+        safety_max = self._settings.BLING_PRODUCT_SYNC_MAX_PAGES
+        total_fetched = total_processed = total_created = total_updated = total_skipped = total_failed = 0
+        current_page = 1
+        pages_done = 0
+
+        while pages_done < safety_max:
+            batch_result = await self.sync_products_batch(
+                start_page=current_page,
+                pages=batch_pages,
+                page_size=self._settings.BLING_SYNC_PAGE_SIZE,
+            )
+            total_fetched += batch_result.fetched
+            total_processed += batch_result.processed
+            total_created += batch_result.created
+            total_updated += batch_result.updated
+            total_skipped += batch_result.skipped
+            total_failed += batch_result.failed
+            pages_done += batch_result.pages_processed
+
+            if batch_result.natural_end or not batch_result.has_more:
+                break
+
+            current_page = batch_result.next_page or (current_page + batch_result.pages_processed)
+
+        return SyncResult(
             entity="products",
             sync_type=sync_type,
-            fetch=lambda: self._client.fetch_products(
-                self._token_provider, page_size=self._settings.BLING_SYNC_PAGE_SIZE
-            ),
-            upsert=self._upsert_product,
+            status="completed",
+            items_processed=total_processed,
+            items_created=total_created,
+            items_updated=total_updated,
+            items_failed=total_failed,
+            items_skipped=total_skipped,
         )
 
     async def sync_products_batch(
