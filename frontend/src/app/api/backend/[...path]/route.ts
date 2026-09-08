@@ -6,6 +6,7 @@ type RouteContext = {
 
 const ALLOWED_GET_PATHS = new Set([
   "analytics/dashboard",
+  "analytics/products",
   "orders",
   "products",
   "sales-channels",
@@ -13,7 +14,8 @@ const ALLOWED_GET_PATHS = new Set([
 
 const ALLOWED_QUERY_PARAMS: Record<string, Set<string>> = {
   "analytics/dashboard": new Set(["days"]),
-  orders: new Set(["status"]),
+  "analytics/products": new Set(),
+  orders: new Set(["status", "period"]),
   products: new Set(),
   "sales-channels": new Set(),
 };

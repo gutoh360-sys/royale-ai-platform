@@ -5,7 +5,9 @@ from backend.database.models.order import Order
 
 class IOrderRepository(ABC):
     @abstractmethod
-    async def find_all(self, status: str | None = None) -> list[Order]: ...
+    async def find_all(
+        self, status: str | None = None, period: str | None = None
+    ) -> list[Order]: ...
 
     @abstractmethod
     async def find_by_id(self, order_id: str) -> Order | None: ...

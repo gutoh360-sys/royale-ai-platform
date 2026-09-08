@@ -17,9 +17,10 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 @router.get("", response_model=list[OrderResponse])
 async def list_orders(
     status: str | None = Query(default=None, max_length=50),
+    period: str | None = Query(default=None),
     service: OrderService = Depends(get_order_service),
 ) -> list[Order]:
-    return await service.list_orders(status)
+    return await service.list_orders(status, period)
 
 
 @router.get("/external/{external_id}", response_model=OrderResponse)

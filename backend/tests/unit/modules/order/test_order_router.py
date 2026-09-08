@@ -162,6 +162,12 @@ async def test_list_orders_invalid_status_returns_422(api_client: AsyncClient) -
     assert response.status_code == 422
 
 
+async def test_orders_period_filter(api_client: AsyncClient) -> None:
+    response = await api_client.get("/orders?period=7d")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
 async def test_update_order_single_field(api_client: AsyncClient) -> None:
     created = await _create_order(api_client)
 

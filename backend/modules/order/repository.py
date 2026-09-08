@@ -5,6 +5,7 @@ from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.core.period import BUSINESS_TZ, parse_period, period_to_range
 from backend.database.models.order import Order
 from backend.modules.order.ports import IOrderRepository
 
@@ -13,10 +14,14 @@ class PostgresOrderRepository(IOrderRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def find_all(self, status: str | None = None) -> list[Order]:
+    async def find_all(self, status: str | None = None, period: str | None = None) -> list[Order]:
         stmt = select(Order)
         if status is not None:
             stmt = stmt.where(Order.status == status)
+        if period is not None:
+            parsed = parse_period(period)
+            start, end = period_to_range(parsed, BUSINESS_TZ)
+            stmt = stmt.where(Order.ordered_at >= start, Order.ordered_at < end)
         stmt = stmt.order_by(Order.created_at, Order.id)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

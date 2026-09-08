@@ -8,8 +8,10 @@ class OrderService:
     def __init__(self, order_repo: IOrderRepository) -> None:
         self._order_repo = order_repo
 
-    async def list_orders(self, status: str | None = None) -> list[Order]:
-        return await self._order_repo.find_all(status)
+    async def list_orders(
+        self, status: str | None = None, period: str | None = None
+    ) -> list[Order]:
+        return await self._order_repo.find_all(status, period)
 
     async def get_order(self, order_id: str) -> Order | None:
         return await self._order_repo.find_by_id(order_id)
