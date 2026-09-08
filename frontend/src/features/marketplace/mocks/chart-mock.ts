@@ -24,11 +24,10 @@ function generateDailyData(
     date.setDate(date.getDate() - i);
     const day = date.getDay();
     const weekendFactor = day === 0 || day === 6 ? 0.55 : 1;
-    const noise = 0.75 + Math.random() * 0.5;
     data.push({
       date: date.toISOString().slice(0, 10),
-      revenue: Math.round(dailyRev * weekendFactor * noise),
-      orders: Math.round(dailyOrd * weekendFactor * noise),
+      revenue: Math.round(dailyRev * weekendFactor),
+      orders: Math.round(dailyOrd * weekendFactor),
     });
   }
   return data;

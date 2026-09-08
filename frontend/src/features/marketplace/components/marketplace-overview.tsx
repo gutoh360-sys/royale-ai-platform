@@ -1,13 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2, AlertCircle, Store } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { ContentContainer } from "@/components/shell/content-container";
 import { MarketplaceSummary } from "./marketplace-summary";
 import { MarketplaceCard } from "./marketplace-card";
 import { useMarketplaceData } from "@/features/marketplace/hooks/use-marketplace-data";
+import { PERIOD_OPTIONS, type Period } from "@/lib/period";
 
 export function MarketplaceOverview() {
-  const { marketplaces, summary, status } = useMarketplaceData();
+  const [activePeriod, setActivePeriod] = useState<Period>("30d");
+  const { marketplaces, summary, status } = useMarketplaceData(activePeriod);
 
   if (status === "loading") {
     return (
@@ -43,11 +47,31 @@ export function MarketplaceOverview() {
 
   return (
     <ContentContainer>
-      <div className="mb-6">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">Marketplaces</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Acompanhe a performance de todos os canais de venda
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Marketplaces</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Acompanhe a performance de todos os canais de venda
+          </p>
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border p-0.5" role="tablist" aria-label="Selecionar período">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setActivePeriod(opt.value)}
+              role="tab"
+              aria-selected={activePeriod === opt.value}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                activePeriod === opt.value
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="space-y-6">
         <MarketplaceSummary summary={summary} />

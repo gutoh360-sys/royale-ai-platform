@@ -16,8 +16,7 @@ import { getChartData } from "@/features/marketplace/mocks/chart-mock";
 import { ExecutiveInsightCard } from "@/features/executive-domain/components/executive-insight-card";
 import { ExecutiveRecommendationCard } from "@/features/executive-domain/components/executive-recommendation-card";
 import { buildInsights, buildRecommendations, getInsightPriority, buildNextActions } from "@/features/marketplace/utils/insights";
-
-const PERIODS = ["7 dias", "30 dias", "90 dias", "12 meses"] as const;
+import { PERIOD_OPTIONS, type Period } from "@/lib/period";
 
 function buildExecutiveSummary(marketplace: {
   name: string;
@@ -38,8 +37,8 @@ interface MarketplaceDetailPageProps {
 }
 
 export function MarketplaceDetailPage({ slug }: MarketplaceDetailPageProps) {
-  const { marketplaces, status } = useMarketplaceData();
-  const [activePeriod, setActivePeriod] = useState<string>("30 dias");
+  const [activePeriod, setActivePeriod] = useState<Period>("30d");
+  const { marketplaces, status } = useMarketplaceData(activePeriod);
 
   const marketplace = useMemo(
     () => marketplaces.find((mp) => mp.slug === slug),
@@ -127,20 +126,20 @@ export function MarketplaceDetailPage({ slug }: MarketplaceDetailPageProps) {
               Indicadores
             </h2>
             <div className="flex items-center gap-1 rounded-lg border p-0.5" role="tablist" aria-label="Selecionar período">
-              {PERIODS.map((period) => (
+              {PERIOD_OPTIONS.map((opt) => (
                 <button
-                  key={period}
-                  onClick={() => setActivePeriod(period)}
+                  key={opt.value}
+                  onClick={() => setActivePeriod(opt.value)}
                   role="tab"
-                  aria-selected={activePeriod === period}
+                  aria-selected={activePeriod === opt.value}
                   className={cn(
                     "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
-                    activePeriod === period
+                    activePeriod === opt.value
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {period}
+                  {opt.label}
                 </button>
               ))}
             </div>
