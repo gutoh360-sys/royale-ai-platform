@@ -9,7 +9,8 @@ import type { Period } from "@/lib/period";
 function buildSummary(products: Product[], analytics: DashboardAnalytics): InventoryIntelligenceSummary {
   const withStock = products.filter((p) => p.stock_quantity > 0);
   const outOfStock = products.filter((p) => p.stock_quantity <= 0 && p.active);
-  const totalValue = products.reduce((s, p) => s + toNumber(p.price) * p.stock_quantity, 0);
+  const productsWithCost = products.filter((p) => toNumber(p.cost) > 0 && p.stock_quantity > 0);
+  const immobilizedCapital = productsWithCost.reduce((s, p) => s + toNumber(p.cost) * p.stock_quantity, 0);
 
   return {
     totalProducts: products.length,
@@ -23,7 +24,7 @@ function buildSummary(products: Product[], analytics: DashboardAnalytics): Inven
     totalSuggestedPurchaseUnits: 0,
     estimatedSuggestedPurchaseCost: 0,
     idleCapitalProductCount: outOfStock.length,
-    idleCapitalValue: totalValue,
+    idleCapitalValue: immobilizedCapital,
     averageCoverageDays: null,
     criticalReplenishmentCount: 0,
     topReplenishmentProducts: [],
@@ -43,7 +44,8 @@ export async function fetchInventoryData(period: Period = "7d"): Promise<Invento
 
     const summary = buildSummary(products, analytics);
     const withStock = products.filter((p) => p.stock_quantity > 0);
-    const totalValue = products.reduce((s, p) => s + toNumber(p.price) * p.stock_quantity, 0);
+    const productsWithCost = products.filter((p) => toNumber(p.cost) > 0 && p.stock_quantity > 0);
+    const immobilizedCapital = productsWithCost.reduce((s, p) => s + toNumber(p.cost) * p.stock_quantity, 0);
 
     const health = products.length > 0 ? Math.min(100, Math.round((withStock.length / products.length) * 100)) : 0;
 
@@ -61,10 +63,10 @@ export async function fetchInventoryData(period: Period = "7d"): Promise<Invento
       formattedAverageCoverage: "-",
       averageTurnover: 0,
       formattedAverageTurnover: "-",
-      immobilizedCapital: totalValue,
-      formattedImmobilizedCapital: formatCurrency(totalValue),
-      stockValue: totalValue,
-      formattedStockValue: formatCurrency(totalValue),
+      immobilizedCapital,
+      formattedImmobilizedCapital: productsWithCost.length > 0 ? formatCurrency(immobilizedCapital) : "N/D",
+      stockValue: immobilizedCapital,
+      formattedStockValue: productsWithCost.length > 0 ? formatCurrency(immobilizedCapital) : "N/D",
       totalCapacity: products.length,
       formattedTotalCapacity: String(products.length),
       utilizationRate: products.length > 0 ? (withStock.length / products.length) * 100 : 0,

@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     BLING_MAX_BACKOFF_SECONDS: float = 5.0
     BLING_TEST_ENDPOINT: str = "/produtos?limite=1"
     BLING_SYNC_PAGE_SIZE: int = 100
-    BLING_PRODUCT_SYNC_MAX_PAGES: int = 5
+    BLING_PRODUCT_SYNC_MAX_PAGES: int = 10000
     BLING_ORDER_SYNC_DAYS_BACK: int = 7
 
     AI_GATEWAY_API_KEY: str = ""
