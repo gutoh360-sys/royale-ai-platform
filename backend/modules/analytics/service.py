@@ -20,10 +20,9 @@ class AnalyticsService:
         parsed = parse_period(period)
         start, end = period_to_range(parsed, BUSINESS_TZ)
 
-        total_orders = await self._repository.count_orders_in_period(start, end)
-        completed_orders = await self._repository.count_completed_orders_in_period(start, end)
+        non_cancelled_orders = await self._repository.count_completed_orders_in_period(start, end)
         revenue = Decimal(str(await self._repository.revenue_in_period(start, end)))
-        average_ticket = round(revenue / completed_orders, 2) if completed_orders else None
+        average_ticket = round(revenue / non_cancelled_orders, 2) if non_cancelled_orders else None
 
         sales_by_period = [
             SalesByPeriodResponse(day=day, total_orders=count, revenue=Decimal(str(total)))
@@ -37,7 +36,7 @@ class AnalyticsService:
             active_products=await self._repository.count_active_products(),
             products_without_stock=await self._repository.count_products_without_stock(),
             total_stock=await self._repository.sum_stock(),
-            total_orders=total_orders,
+            total_orders=non_cancelled_orders,
             orders_by_status=await self._repository.orders_by_status_in_period(start, end),
             revenue=revenue,
             average_ticket=average_ticket,
