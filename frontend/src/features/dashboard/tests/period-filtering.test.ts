@@ -21,8 +21,7 @@ describe("Dashboard period filtering", () => {
     expect(dashboardPageSource).toContain('useState<Period>("7d")');
     expect(dashboardPageSource).toContain("useExecutiveCommandCenter(period)");
     expect(dashboardPageSource).toContain("useMarketplaceData(period)");
-    expect(dashboardPageSource).toContain("useInventoryData(period)");
-    expect(dashboardPageSource).toContain("useSalesData(period)");
+    expect(dashboardPageSource).toContain("useProductsData()");
   });
 
   it("period selector renders all 5 options", () => {

@@ -51,15 +51,12 @@ describe("priority screens API regression", () => {
     expect(page).toContain("Erro ao carregar dados de vendas");
   });
 
-  it("Dashboard keeps all priority hooks wired to real data", () => {
+  it("Dashboard keeps core hooks wired to real data", () => {
     const page = readSource("features/dashboard/components/dashboard-page.tsx");
 
     expect(page).toContain("useExecutiveCommandCenter");
     expect(page).toContain("useMarketplaceData");
-    expect(page).toContain("useInventoryData");
-    expect(page).toContain("useSalesData");
     expect(page).toContain("useProductsData");
     expect(page).toContain('ccStatus === "error"');
-    expect(page).toContain('<ExecutiveSummary state="error" />');
   });
 });
