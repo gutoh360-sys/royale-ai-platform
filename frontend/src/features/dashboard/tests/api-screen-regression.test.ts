@@ -26,10 +26,10 @@ describe("priority screens API regression", () => {
     const service = readSource("services/api-products.ts");
     const page = readSource("features/products-executive/components/products-detail-page.tsx");
 
-    expect(service).toContain('api.get<Product[]>("/products")');
+    expect(service).toContain("/products");
     expect(page).toContain("useProductsData");
     expect(page).toContain('status === "error"');
-    expect(page).toContain("Erro ao carregar dados de produtos");
+    expect(page).toContain("Erro ao carregar dados reais de produtos");
   });
 
   it("Inventory continues to use products and analytics with reachable errors", () => {

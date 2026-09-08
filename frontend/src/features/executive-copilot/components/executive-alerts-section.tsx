@@ -32,12 +32,8 @@ export function ExecutiveAlertsSection({ snapshots }: Props) {
     alerts.push(`Saúde das vendas em ${sales.sales.health}% — desempenho abaixo do esperado.`)
   }
 
-  if (products.summary && products.summary.health < 70) {
-    alerts.push(`Saúde do portfólio em ${products.summary.health}% — produtos com baixo desempenho.`)
-  }
-
-  if (products.summary && products.summary.growth < 0) {
-    alerts.push(`Retração de ${Math.abs(products.summary.growth)}% no portfólio de produtos.`)
+  if (products.summary && products.summary.outOfStockProducts > 0) {
+    alerts.push(`${products.summary.outOfStockProducts} produto(s) do catálogo sem estoque.`)
   }
 
   if (sales.sales && sales.sales.growth < 0) {

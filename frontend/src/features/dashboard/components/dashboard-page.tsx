@@ -121,10 +121,10 @@ export function DashboardPage() {
                 name="Produtos"
                 icon="P"
                 href="/products"
-                kpi={prSummary.totalRevenue}
-                kpiLabel="Receita total"
-                insight={`${prSummary.activeProducts} produtos ativos`}
-                priority={prSummary.health >= 80 ? "baixa" : prSummary.health >= 60 ? "media" : "alta"}
+                kpi={String(prSummary.totalProducts)}
+                kpiLabel="Produtos totais"
+                insight={`${prSummary.outOfStockProducts} produto(s) sem estoque`}
+                priority={prSummary.outOfStockProducts > 0 ? "media" : "baixa"}
                 enabled={prStatus === "success"}
               />
               <ExecutiveModuleCard

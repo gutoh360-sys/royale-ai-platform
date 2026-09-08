@@ -1,123 +1,88 @@
 import { api } from "@/lib/api";
-import { safeRatio, toNumber } from "@/lib/api-values";
-import { formatCurrency, formatPercentage } from "@/lib/format";
+import { toNumber } from "@/lib/api-values";
+import { formatCurrency } from "@/lib/format";
 import type { Product } from "@/types/api";
 import type {
-  ProductPerformance,
-  CategoryData,
+  ProductCatalogItem,
+  CountDistributionItem,
   PortfolioSummary,
   ProductsDataResult,
 } from "@/features/products-executive/types";
 
-function mapProduct(p: Product, totalRevenue: number): ProductPerformance {
-  const price = toNumber(p.price);
-  const cost = toNumber(p.cost);
-  const revenue = price * (p.stock_quantity > 0 ? 1 : 0);
-  const margin = cost > 0 && price > 0 ? safeRatio(price - cost, price) * 100 : 0;
-  const share = safeRatio(revenue, totalRevenue) * 100;
+const SALES_UNAVAILABLE = "N/D";
 
-  let status: ProductPerformance["status"] = "question_mark";
-  if (margin > 40 && share > 5) status = "star";
-  else if (margin > 20 && share > 3) status = "cash_cow";
-  else if (margin < 10 || share < 1) status = "dog";
+type ProductWithOptionalCategory = Product & {
+  category?: { name?: unknown } | null;
+  category_name?: unknown;
+};
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function realText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || isUuid(trimmed)) return null;
+  return trimmed;
+}
+
+function resolveCategory(product: ProductWithOptionalCategory) {
+  return realText(product.category_name) ?? realText(product.category?.name) ?? "Sem categoria";
+}
+
+function resolveBrand(brand: string | null) {
+  return realText(brand) ?? "Sem marca";
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "N/D";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/D";
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
+}
+
+function mapProduct(product: ProductWithOptionalCategory): ProductCatalogItem {
+  const price = toNumber(product.price);
 
   return {
-    id: p.id,
-    name: p.name,
-    sku: p.sku,
-    category: p.category_id,
-    revenue,
-    formattedRevenue: formatCurrency(revenue),
-    orders: 0,
-    formattedOrders: "0",
-    margin,
-    formattedMargin: formatPercentage(margin),
-    growth: 0,
-    share,
-    formattedShare: formatPercentage(share),
-    status,
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    ean: product.ean,
+    brand: resolveBrand(product.brand),
+    category: resolveCategory(product),
+    price,
+    formattedPrice: price > 0 ? formatCurrency(price) : "N/D",
+    stockQuantity: product.stock_quantity,
+    active: product.active,
+    formattedLastSyncedAt: formatDate(product.last_synced_at),
   };
 }
 
-function mapCategories(products: ProductPerformance[]): CategoryData[] {
-  const byCategory = new Map<string, ProductPerformance[]>();
-  for (const p of products) {
-    const key = p.category || "Sem categoria";
-    const arr = byCategory.get(key) ?? [];
-    arr.push(p);
-    byCategory.set(key, arr);
-  }
-
-  return Array.from(byCategory.entries()).map(([name, items]) => {
-    const revenue = items.reduce((s, p) => s + p.revenue, 0);
-    return {
-      name,
-      revenue,
-      formattedRevenue: formatCurrency(revenue),
-      growth: 0,
-      productCount: items.length,
-      share: 0,
-    };
-  });
+function countBy(values: string[]) {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR"));
 }
 
-export async function fetchProductsData(): Promise<ProductsDataResult> {
-  try {
-    const products = await api.get<Product[]>("/products");
+function stockDistribution(products: ProductCatalogItem[]): CountDistributionItem[] {
+  const ranges = [
+    { name: "Sem estoque", count: 0, match: (value: number) => value <= 0 },
+    { name: "1-5 unidades", count: 0, match: (value: number) => value >= 1 && value <= 5 },
+    { name: "6-20", count: 0, match: (value: number) => value >= 6 && value <= 20 },
+    { name: "21-50", count: 0, match: (value: number) => value >= 21 && value <= 50 },
+    { name: "50+", count: 0, match: (value: number) => value > 50 },
+  ];
 
-    if (products.length === 0) {
-      return {
-        products: [],
-        categories: [],
-        summary: emptySummary(),
-        status: "empty",
-        error: null,
-      };
-    }
-
-    const totalRevenue = products.reduce((s, p) => s + toNumber(p.price), 0);
-    const mapped = products.map((p) => mapProduct(p, totalRevenue));
-    const categories = mapCategories(mapped);
-    const activeCount = products.filter((p) => p.active).length;
-    const withStock = products.filter((p) => p.stock_quantity > 0).length;
-
-    const sorted = [...mapped].sort((a, b) => b.revenue - a.revenue);
-    const top = sorted[0];
-    const top10Revenue = sorted.slice(0, 10).reduce((s, p) => s + p.revenue, 0);
-
-    const summary: PortfolioSummary = {
-      totalProducts: products.length,
-      activeProducts: activeCount,
-      formattedActiveProducts: String(activeCount),
-      categories: categories.length,
-      topSku: top?.sku ?? "-",
-      topSkuName: top?.name ?? "-",
-      topSkuRevenue: top?.formattedRevenue ?? formatCurrency(0),
-      averageRevenuePerProduct: formatCurrency(totalRevenue / products.length),
-      averageMargin: formatPercentage(
-        mapped.reduce((s, p) => s + p.margin, 0) / mapped.length,
-      ),
-      averageMarginValue: mapped.reduce((s, p) => s + p.margin, 0) / mapped.length,
-      top10Concentration: formatPercentage(
-        totalRevenue > 0 ? (top10Revenue / totalRevenue) * 100 : 0,
-      ),
-      top10ConcentrationValue: totalRevenue > 0 ? (top10Revenue / totalRevenue) * 100 : 0,
-      totalRevenue: formatCurrency(totalRevenue),
-      totalRevenueValue: totalRevenue,
-      health: withStock > 0 ? Math.min(100, Math.round((withStock / products.length) * 100)) : 0,
-      growth: 0,
-    };
-
-    return { products: mapped, categories, summary, status: "success", error: null };
-  } catch (e) {
-    return {
-      products: [],
-      categories: [],
-      summary: emptySummary(),
-      status: "error",
-      error: e instanceof Error ? e.message : "Unknown error",
-    };
+  for (const product of products) {
+    const range = ranges.find((item) => item.match(product.stockQuantity));
+    if (range) range.count += 1;
   }
+
+  return ranges.map(({ name, count }) => ({ name, count }));
 }
 
 function emptySummary(): PortfolioSummary {
@@ -125,18 +90,96 @@ function emptySummary(): PortfolioSummary {
     totalProducts: 0,
     activeProducts: 0,
     formattedActiveProducts: "0",
+    outOfStockProducts: 0,
+    totalStock: 0,
+    averageRegisteredPrice: SALES_UNAVAILABLE,
+    productsWithPrice: 0,
+    brands: 0,
     categories: 0,
-    topSku: "-",
-    topSkuName: "-",
-    topSkuRevenue: formatCurrency(0),
-    averageRevenuePerProduct: formatCurrency(0),
-    averageMargin: formatPercentage(0),
-    averageMarginValue: 0,
-    top10Concentration: formatPercentage(0),
-    top10ConcentrationValue: 0,
-    totalRevenue: formatCurrency(0),
-    totalRevenueValue: 0,
-    health: 0,
-    growth: 0,
+    topSku: SALES_UNAVAILABLE,
+    topSkuName: SALES_UNAVAILABLE,
+    topSkuRevenue: SALES_UNAVAILABLE,
+    averageRevenuePerProduct: SALES_UNAVAILABLE,
+    averageMargin: SALES_UNAVAILABLE,
+    top10Concentration: SALES_UNAVAILABLE,
+    totalRevenue: SALES_UNAVAILABLE,
+    growth: SALES_UNAVAILABLE,
   };
+}
+
+function buildSummary(products: ProductCatalogItem[]): PortfolioSummary {
+  const productsWithPrice = products.filter((product) => product.price > 0);
+  const averagePrice = productsWithPrice.length > 0
+    ? formatCurrency(productsWithPrice.reduce((sum, product) => sum + product.price, 0) / productsWithPrice.length)
+    : SALES_UNAVAILABLE;
+  const realCategoryCount = new Set(products.filter((product) => product.category !== "Sem categoria").map((product) => product.category)).size;
+  const realBrandCount = new Set(products.filter((product) => product.brand !== "Sem marca").map((product) => product.brand)).size;
+
+  return {
+    ...emptySummary(),
+    totalProducts: products.length,
+    activeProducts: products.filter((product) => product.active).length,
+    formattedActiveProducts: String(products.filter((product) => product.active).length),
+    outOfStockProducts: products.filter((product) => product.stockQuantity <= 0).length,
+    totalStock: products.reduce((sum, product) => sum + product.stockQuantity, 0),
+    averageRegisteredPrice: averagePrice,
+    productsWithPrice: productsWithPrice.length,
+    brands: realBrandCount,
+    categories: realCategoryCount,
+  };
+}
+
+export async function fetchProductsData(): Promise<ProductsDataResult> {
+  try {
+    const data = await api.get<ProductWithOptionalCategory[]>("/products");
+
+    if (data.length === 0) {
+      return {
+        products: [],
+        stockDistribution: stockDistribution([]),
+        brandDistribution: [],
+        categoryDistribution: [],
+        statusDistribution: [
+          { name: "Ativos", count: 0 },
+          { name: "Inativos", count: 0 },
+        ],
+        summary: emptySummary(),
+        salesAnalytics: null,
+        status: "empty",
+        error: null,
+      };
+    }
+
+    const mapped = data.map(mapProduct);
+
+    return {
+      products: mapped,
+      stockDistribution: stockDistribution(mapped),
+      brandDistribution: countBy(mapped.map((product) => product.brand)),
+      categoryDistribution: countBy(mapped.map((product) => product.category)),
+      statusDistribution: [
+        { name: "Ativos", count: mapped.filter((product) => product.active).length },
+        { name: "Inativos", count: mapped.filter((product) => !product.active).length },
+      ],
+      summary: buildSummary(mapped),
+      salesAnalytics: null,
+      status: "success",
+      error: null,
+    };
+  } catch (e) {
+    return {
+      products: [],
+      stockDistribution: stockDistribution([]),
+      brandDistribution: [],
+      categoryDistribution: [],
+      statusDistribution: [
+        { name: "Ativos", count: 0 },
+        { name: "Inativos", count: 0 },
+      ],
+      summary: emptySummary(),
+      salesAnalytics: null,
+      status: "error",
+      error: e instanceof Error ? e.message : "Unknown error",
+    };
+  }
 }

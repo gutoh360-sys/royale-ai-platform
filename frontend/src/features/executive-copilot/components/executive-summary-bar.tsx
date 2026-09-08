@@ -8,7 +8,7 @@ interface Props {
 }
 
 export function ExecutiveSummaryBar({ snapshots }: Props) {
-  const { marketplace, financial, inventory, sales, products, priorities } = snapshots
+  const { marketplace, financial, inventory, sales, priorities } = snapshots
 
   const parts: string[] = []
 
@@ -17,7 +17,6 @@ export function ExecutiveSummaryBar({ snapshots }: Props) {
     { name: "Finanças", value: financial.financial?.health ?? null },
     { name: "Estoque", value: inventory.inventory?.health ?? null },
     { name: "Vendas", value: sales.sales?.health ?? null },
-    { name: "Produtos", value: products.summary?.health ?? null },
   ]
 
   const good = healths.filter((h) => h.value !== null && h.value >= 70).length

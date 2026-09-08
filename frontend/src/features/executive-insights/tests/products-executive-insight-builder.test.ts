@@ -16,19 +16,20 @@ function emptyInput(): ProductsInsightInput {
       totalProducts: 0,
       activeProducts: 0,
       formattedActiveProducts: "0",
+      outOfStockProducts: 0,
+      totalStock: 0,
+      averageRegisteredPrice: "N/D",
+      productsWithPrice: 0,
+      brands: 0,
       categories: 0,
-      topSku: "",
-      topSkuName: "",
-      topSkuRevenue: "",
-      averageRevenuePerProduct: "",
-      averageMargin: "",
-      averageMarginValue: 0,
-      top10Concentration: "",
-      top10ConcentrationValue: 0,
-      totalRevenue: "",
-      totalRevenueValue: 0,
-      health: 0,
-      growth: 0,
+      topSku: "N/D",
+      topSkuName: "N/D",
+      topSkuRevenue: "N/D",
+      averageRevenuePerProduct: "N/D",
+      averageMargin: "N/D",
+      top10Concentration: "N/D",
+      totalRevenue: "N/D",
+      growth: "N/D",
     },
     existingInsights: [],
     existingRecommendations: [],
@@ -69,10 +70,10 @@ describe("ProductsExecutiveInsightBuilder", () => {
     expect(result[0].severity).toBe(ExecutiveInsightSeverity.INFO)
   })
 
-  it("includes summary health in evidence", () => {
+  it("includes catalog product count in evidence", () => {
     const builder = new ProductsExecutiveInsightBuilder()
     const input = emptyInput()
-    input.summary.health = 85
+    input.summary.totalProducts = 85
     input.existingInsights = [{ fact: "F", reason: "R", impact: "I", action: "A" }]
     const result = builder.build(input, context)
     expect(result[0].evidence.value).toBe(85)

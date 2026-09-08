@@ -38,8 +38,8 @@ export class ProductsExecutiveInsightBuilder
         recommendation: src.action,
         evidence: {
           source: "products",
-          metric: "health",
-          value: input.summary.health,
+          metric: "catalog_products",
+          value: input.summary.totalProducts,
           classification: "existing_insight",
           generatedAt: context.refDate.toISOString(),
         },

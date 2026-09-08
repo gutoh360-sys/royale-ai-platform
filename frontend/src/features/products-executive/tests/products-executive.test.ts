@@ -1,125 +1,95 @@
-import { describe, it, expect } from "vitest"
-import { mockProducts, mockCategories, mockPortfolioSummary } from "@/features/products-executive/mocks"
-import { buildProductsInsights, buildProductsRecommendations } from "@/features/products-executive/utils/products-insights"
-import { MockProductsDataService } from "@/features/products-executive/services/products-data-service"
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import type { ProductCatalogItem } from "@/features/products-executive/types";
+import {
+  filterProducts,
+  paginateProducts,
+  PRODUCTS_PAGE_SIZE,
+} from "@/features/products-executive/utils/catalog-view";
 
-describe("products-executive types and mocks", () => {
-  it("has 12 products in mock data", () => {
-    expect(mockProducts.length).toBe(12)
-  })
+const featureRoot = resolve(__dirname, "..");
 
-  it("has 5 categories in mock data", () => {
-    expect(mockCategories.length).toBe(5)
-  })
+const catalogProducts: ProductCatalogItem[] = [
+  {
+    id: "1",
+    sku: "SKU-001",
+    ean: "7890000000011",
+    name: "Produto Alpha",
+    brand: "Marca A",
+    category: "Sem categoria",
+    price: 100,
+    formattedPrice: "R$ 100,00",
+    stockQuantity: 0,
+    active: true,
+    formattedLastSyncedAt: "01/08/2026, 10:00",
+  },
+  {
+    id: "2",
+    sku: "SKU-002",
+    ean: null,
+    name: "Produto Beta",
+    brand: "Marca B",
+    category: "Acessórios",
+    price: 50,
+    formattedPrice: "R$ 50,00",
+    stockQuantity: 12,
+    active: false,
+    formattedLastSyncedAt: "N/D",
+  },
+];
 
-  it("portfolio summary has all required fields", () => {
-    const s = mockPortfolioSummary
-    expect(s.totalProducts).toBe(12)
-    expect(s.categories).toBe(5)
-    expect(s.activeProducts).toBeGreaterThan(0)
-    expect(s.topSku).toBeTruthy()
-    expect(s.averageMargin).toBeTruthy()
-    expect(s.averageRevenuePerProduct).toBeTruthy()
-    expect(s.top10Concentration).toBeTruthy()
-    expect(s.health).toBeGreaterThanOrEqual(0)
-    expect(s.health).toBeLessThanOrEqual(100)
-  })
-})
+describe("products page real-data constraints", () => {
+  it("does not keep products mock files in the feature", () => {
+    expect(existsSync(resolve(featureRoot, "mocks/index.ts"))).toBe(false);
+  });
 
-describe("buildProductsInsights", () => {
-  const input = {
-    products: mockProducts.map((p) => ({
-      name: p.name,
-      revenue: p.revenue,
-      formattedRevenue: p.formattedRevenue,
-      margin: p.margin,
-      formattedMargin: p.formattedMargin,
-      growth: p.growth,
-      share: p.share,
-      formattedShare: p.formattedShare,
-    })),
-    categories: mockCategories.map((c) => ({
-      name: c.name,
-      formattedRevenue: c.formattedRevenue,
-      growth: c.growth,
-    })),
-    totalRevenue: mockPortfolioSummary.totalRevenue,
-    topSkuName: mockPortfolioSummary.topSkuName,
-    topSkuRevenue: mockPortfolioSummary.topSkuRevenue,
-  }
+  it("does not render fake sales calculations while order_items are unavailable", () => {
+    const pageSource = readFileSync(resolve(featureRoot, "components/products-detail-page.tsx"), "utf8");
 
-  it("returns at least 3 insights", () => {
-    const result = buildProductsInsights(input)
-    expect(result.length).toBeGreaterThanOrEqual(3)
-  })
+    expect(pageSource).not.toContain("Receita Total");
+    expect(pageSource).not.toContain("Saúde do Portfólio");
+    expect(pageSource).not.toContain("Performance por Produto");
+    expect(pageSource).toContain("Preço Médio Cadastrado");
+    expect(pageSource).toContain("Receita por Produto");
+    expect(pageSource).toContain("N/D");
+    expect(pageSource).toContain("Aguardando integração dos itens dos pedidos");
+  });
 
-  it("first insight mentions top revenue product", () => {
-    const result = buildProductsInsights(input)
-    const topProduct = [...mockProducts].sort((a, b) => b.revenue - a.revenue)[0]
-    expect(result[0].fact).toContain(topProduct.name)
-  })
+  it("never imports mock products data from the page path", () => {
+    const pageSource = readFileSync(resolve(featureRoot, "components/products-detail-page.tsx"), "utf8");
+    const hookSource = readFileSync(resolve(featureRoot, "hooks/use-products-data.ts"), "utf8");
 
-  it("insights have fact, reason, impact, action", () => {
-    const result = buildProductsInsights(input)
-    for (const insight of result) {
-      expect(insight.fact).toBeTruthy()
-      expect(insight.reason).toBeTruthy()
-      expect(insight.impact).toBeTruthy()
-      expect(insight.action).toBeTruthy()
-    }
-  })
+    expect(`${pageSource}\n${hookSource}`).not.toMatch(/products-executive\/mocks|MockProductsDataService|mockProducts|mockCategories|fake|sample/);
+  });
+});
 
-  it("no arbitrary numeric thresholds in insights", () => {
-    const result = buildProductsInsights(input)
-    const allText = result.map((i) => `${i.fact} ${i.reason} ${i.impact} ${i.action}`).join(" ")
-    expect(allText).not.toMatch(/threshold|limiar|acima de \d+%?/i)
-  })
-})
+describe("catalog table filtering and pagination", () => {
+  it("searches by SKU, name, and EAN", () => {
+    expect(filterProducts(catalogProducts, { search: "SKU-001" }).map((p) => p.id)).toEqual(["1"]);
+    expect(filterProducts(catalogProducts, { search: "beta" }).map((p) => p.id)).toEqual(["2"]);
+    expect(filterProducts(catalogProducts, { search: "7890000000011" }).map((p) => p.id)).toEqual(["1"]);
+  });
 
-describe("buildProductsRecommendations", () => {
-  const input = {
-    products: mockProducts.map((p) => ({
-      name: p.name,
-      revenue: p.revenue,
-      formattedRevenue: p.formattedRevenue,
-      margin: p.margin,
-      formattedMargin: p.formattedMargin,
-      growth: p.growth,
-      share: p.share,
-      formattedShare: p.formattedShare,
-    })),
-    categories: mockCategories.map((c) => ({
-      name: c.name,
-      formattedRevenue: c.formattedRevenue,
-      growth: c.growth,
-    })),
-    totalRevenue: mockPortfolioSummary.totalRevenue,
-    topSkuName: mockPortfolioSummary.topSkuName,
-    topSkuRevenue: mockPortfolioSummary.topSkuRevenue,
-  }
+  it("filters by active status, stock availability, brand, and category", () => {
+    expect(filterProducts(catalogProducts, { status: "active" }).map((p) => p.id)).toEqual(["1"]);
+    expect(filterProducts(catalogProducts, { status: "inactive" }).map((p) => p.id)).toEqual(["2"]);
+    expect(filterProducts(catalogProducts, { stock: "out" }).map((p) => p.id)).toEqual(["1"]);
+    expect(filterProducts(catalogProducts, { stock: "in" }).map((p) => p.id)).toEqual(["2"]);
+    expect(filterProducts(catalogProducts, { brand: "Marca B" }).map((p) => p.id)).toEqual(["2"]);
+    expect(filterProducts(catalogProducts, { category: "Acessórios" }).map((p) => p.id)).toEqual(["2"]);
+  });
 
-  it("returns recommendations", () => {
-    const result = buildProductsRecommendations(input)
-    expect(result.length).toBeGreaterThanOrEqual(3)
-  })
+  it("uses 50 products per visual page", () => {
+    const manyProducts = Array.from({ length: 121 }, (_, index) => ({
+      ...catalogProducts[0],
+      id: String(index + 1),
+      sku: `SKU-${index + 1}`,
+    }));
 
-  it("recommendations have action and reason", () => {
-    const result = buildProductsRecommendations(input)
-    for (const rec of result) {
-      expect(rec.action).toBeTruthy()
-      expect(rec.reason).toBeTruthy()
-    }
-  })
-})
-
-describe("MockProductsDataService", () => {
-  it("returns products with success status", async () => {
-    const service = new MockProductsDataService()
-    const result = await service.fetch()
-    expect(result.status).toBe("success")
-    expect(result.products.length).toBeGreaterThan(0)
-    expect(result.categories.length).toBeGreaterThan(0)
-    expect(result.summary.totalProducts).toBeGreaterThan(0)
-    expect(result.error).toBeNull()
-  })
-})
+    expect(PRODUCTS_PAGE_SIZE).toBe(50);
+    expect(paginateProducts(manyProducts, 1).items).toHaveLength(50);
+    expect(paginateProducts(manyProducts, 3).items).toHaveLength(21);
+    expect(paginateProducts(manyProducts, 99).page).toBe(3);
+  });
+});

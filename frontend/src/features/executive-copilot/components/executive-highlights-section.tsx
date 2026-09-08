@@ -28,16 +28,12 @@ export function ExecutiveHighlightsSection({ snapshots }: Props) {
     highlights.push(`Vendas com saúde ${sales.sales.health}% — bom desempenho comercial.`)
   }
 
-  if (products.summary && products.summary.health >= 70) {
-    highlights.push(`Portfólio de produtos saudável (${products.summary.health}%).`)
+  if (products.summary && products.summary.totalProducts > 0) {
+    highlights.push(`${products.summary.totalProducts} produto(s) reais no catálogo.`)
   }
 
   if (purchasing.summary.health >= 70) {
     highlights.push(`Fornecedores com saúde ${purchasing.summary.health}% — boa relação comercial.`)
-  }
-
-  if (products.summary && products.summary.growth > 0) {
-    highlights.push(`Crescimento de ${products.summary.growth}% no portfólio de produtos.`)
   }
 
   if (sales.sales && sales.sales.growth > 0) {
