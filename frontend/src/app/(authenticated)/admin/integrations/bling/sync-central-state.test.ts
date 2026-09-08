@@ -20,8 +20,8 @@ describe("Bling sync central runtime safety", () => {
     const html = renderToString(React.createElement(BlingSyncPage));
 
     expect(html).toContain("Integrações");
-    expect(html).toContain("Produtos");
-    expect(html).toContain("Itens dos Pedidos");
+    expect(html).toContain("SINCRONIZAR TUDO AGORA");
+    expect(html).toContain("Detalhes técnicos");
   });
 
   it("accepts a valid sync-status response", () => {

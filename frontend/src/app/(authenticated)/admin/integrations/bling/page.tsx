@@ -1,60 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { PageTitle } from "@/components/shell/page-title";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
   Loader2,
   Package,
-  Pause,
-  Play,
   RefreshCw,
-  RotateCcw,
   ShoppingCart,
+  Store,
   XCircle,
 } from "lucide-react";
 import {
-  PRODUCT_SYNC_FALLBACK,
-  parseProductSyncState,
-  parseSyncStatus,
-  type ProductSyncTotals,
-  type SyncStatus,
+  parseEnhancedSyncStatus,
+  type EnhancedSyncStatus,
+  type SyncAllPhase,
+  type SyncAllResult,
 } from "./sync-central-state";
-
-interface ProductBatchResult {
-  start_page: number;
-  end_page: number;
-  pages_processed: number;
-  fetched: number;
-  processed: number;
-  created: number;
-  updated: number;
-  skipped: number;
-  failed: number;
-  next_page: number | null;
-  has_more: boolean;
-  natural_end: boolean;
-  skip_reasons: Record<string, number>;
-}
-
-interface OrderItemsResult {
-  selected: number;
-  processed: number;
-  orders_enriched: number;
-  items_created: number;
-  unknown_products: number;
-  detail_without_items: number;
-  not_found: number;
-  failed: number;
-  remaining_without_items: number;
-  next_cursor: string | null;
-  has_more: boolean;
-}
 
 interface LogEntry {
   time: string;
@@ -62,28 +31,14 @@ interface LogEntry {
   type: "info" | "success" | "error" | "warning";
 }
 
-type SyncStatusEnum = "idle" | "running" | "paused" | "completed" | "error";
-type AddLog = (message: string, type?: LogEntry["type"]) => void;
+type SyncStatusEnum = "idle" | "running" | "completed" | "error";
 
-const STORAGE_KEY_PRODUCTS = "royale-sync-products";
-
-function readStoredProductSyncState() {
-  if (typeof window === "undefined") return PRODUCT_SYNC_FALLBACK;
-  try {
-    return parseProductSyncState(window.localStorage.getItem(STORAGE_KEY_PRODUCTS));
-  } catch {
-    return PRODUCT_SYNC_FALLBACK;
-  }
-}
-
-function saveProductSyncState(value: unknown) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(value));
-  } catch {
-    return;
-  }
-}
+const PHASE_LABELS: Record<string, string> = {
+  products: "Catálogo de produtos",
+  orders: "Pedidos",
+  order_items: "Itens dos pedidos",
+  channels: "Canais de venda",
+};
 
 function timestamp() {
   return new Date().toLocaleTimeString("pt-BR", {
@@ -99,438 +54,418 @@ function formatNumber(n: unknown): string {
     : "0";
 }
 
-export default function BlingSyncPage() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const addLog = useCallback<AddLog>((message, type = "info") => {
-    setLogs((prev) => [...prev.slice(-49), { time: timestamp(), message, type }]);
-  }, []);
-
-  return (
-    <div className="flex flex-col gap-6 p-6">
-      <PageTitle
-        title="Integrações"
-        description="Operações de sincronização e backfill do Bling."
-      />
-      <ProductSyncCard addLog={addLog} />
-      <OrderItemsCard addLog={addLog} />
-      <ActivityLog logs={logs} />
-    </div>
-  );
+function relativeTime(iso: string | null): string {
+  if (!iso) return "Nunca";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return "Agora mesmo";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}min atrás`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h atrás`;
+  return `${Math.floor(diff / 86_400_000)}d atrás`;
 }
 
-function ProductSyncCard({ addLog }: { addLog: AddLog }) {
-  const [status, setStatus] = useState<SyncStatusEnum>("idle");
-  const [startPage, setStartPage] = useState(PRODUCT_SYNC_FALLBACK.startPage);
-  const [currentPage, setCurrentPage] = useState(PRODUCT_SYNC_FALLBACK.currentPage);
-  const [totals, setTotals] = useState<ProductSyncTotals>(PRODUCT_SYNC_FALLBACK.totals);
-  const [lastBatch, setLastBatch] = useState<ProductBatchResult | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [statusLoading, setStatusLoading] = useState(false);
-  const [statusError, setStatusError] = useState<string | null>(null);
-  const [storageReady, setStorageReady] = useState(false);
+function connectionStatus(s: EnhancedSyncStatus | null, sync: SyncStatusEnum): {
+  label: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+  icon: React.ReactNode;
+} {
+  if (sync === "running") {
+    return { label: "Sincronizando", variant: "default", icon: <Loader2 className="h-3 w-3 animate-spin" /> };
+  }
+  if (sync === "error") {
+    return { label: "Erro", variant: "destructive", icon: <XCircle className="h-3 w-3" /> };
+  }
+  if (!s) {
+    return { label: "Desconhecido", variant: "outline", icon: <AlertTriangle className="h-3 w-3" /> };
+  }
+  return { label: "Conectado", variant: "secondary", icon: <CheckCircle2 className="h-3 w-3" /> };
+}
+
+function lastSyncTime(s: EnhancedSyncStatus | null): string {
+  if (!s) return "Nunca";
+  const times = [
+    s.products_last_synced_at,
+    s.orders_last_synced_at,
+    s.order_items_last_synced_at,
+    s.channels_last_synced_at,
+  ].filter(Boolean) as string[];
+  if (times.length === 0) return "Nunca";
+  return relativeTime(times.sort().pop()!);
+}
+
+export default function BlingSyncPage() {
+  const [status, setStatus] = useState<EnhancedSyncStatus | null>(null);
+  const [lockHeld, setLockHeld] = useState(false);
+  const [sync, setSync] = useState<SyncStatusEnum>("idle");
+  const [syncAllResult, setSyncAllResult] = useState<SyncAllResult | null>(null);
+  const [phaseProgress, setPhaseProgress] = useState<string>("");
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [showDetails, setShowDetails] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const runningRef = useRef(false);
   const abortRef = useRef(false);
 
-  useEffect(() => {
-    const saved = readStoredProductSyncState();
-    setStartPage(saved.startPage);
-    setCurrentPage(saved.currentPage);
-    setTotals(saved.totals);
-    setStorageReady(true);
+  const addLog = useCallback((message: string, type: LogEntry["type"] = "info") => {
+    setLogs((prev) => [...prev.slice(-49), { time: timestamp(), message, type }]);
   }, []);
 
-  useEffect(() => {
-    if (!storageReady) return;
-    saveProductSyncState({ startPage, currentPage, totals });
-  }, [storageReady, startPage, currentPage, totals]);
-
   const fetchStatus = useCallback(async () => {
-    setStatusLoading(true);
-    setStatusError(null);
-
     try {
-      const res = await fetch("/api/integrations/sync-status");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const [statusRes, lockRes] = await Promise.all([
+        fetch("/api/integrations/sync-status"),
+        fetch("/api/integrations/lock-status"),
+      ]);
 
-      const parsed = parseSyncStatus(await res.json());
-      if (!parsed) throw new Error("Resposta inválida");
+      if (statusRes.ok) {
+        const raw = await statusRes.json();
+        const parsed = parseEnhancedSyncStatus(raw);
+        setStatus(parsed);
+      }
 
-      setSyncStatus(parsed);
-    } catch (err) {
-      setSyncStatus(null);
-      setStatusError("Não foi possível carregar o status");
-      addLog(
-        `Erro ao carregar status: ${err instanceof Error ? err.message : "desconhecido"}`,
-        "error",
-      );
+      if (lockRes.ok) {
+        const lockData = await lockRes.json();
+        setLockHeld(!!lockData.held);
+      }
+
+      setError(null);
+    } catch {
+      setError("Não foi possível carregar o status");
     } finally {
-      setStatusLoading(false);
+      setLoading(false);
     }
-  }, [addLog]);
+  }, []);
 
   useEffect(() => {
     void fetchStatus();
   }, [fetchStatus]);
 
-  const runBatch = useCallback(async (page: number): Promise<ProductBatchResult> => {
-    const res = await fetch("/api/integrations/sync-products-batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_page: page, pages: 10 }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  }, []);
-
-  const startSync = useCallback(async () => {
-    if (runningRef.current) return;
+  const runSyncAll = useCallback(async () => {
+    if (runningRef.current || lockHeld) return;
     runningRef.current = true;
     abortRef.current = false;
-    setStatus("running");
-    addLog(`Páginas ${startPage}-${startPage + 9} iniciadas`);
+    setSync("running");
+    setSyncAllResult(null);
+    addLog("Sincronização completa iniciada");
 
-    let page = startPage;
     try {
-      while (!abortRef.current) {
-        const result = await runBatch(page);
-        setLastBatch(result);
-        setTotals((prev) => ({
-          fetched: prev.fetched + result.fetched,
-          processed: prev.processed + result.processed,
-          created: prev.created + result.created,
-          updated: prev.updated + result.updated,
-          skipped: prev.skipped + result.skipped,
-          failed: prev.failed + result.failed,
-        }));
+      const res = await fetch("/api/integrations/sync-all", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        addLog(
-          `${result.start_page}-${result.end_page} concluído: ${formatNumber(result.processed)} processados, ${formatNumber(result.created)} criados, ${formatNumber(result.skipped)} ignorados`,
-          result.failed > 0 ? "error" : "success",
-        );
+      const result: SyncAllResult = await res.json();
+      setSyncAllResult(result);
 
-        if (result.failed > 0) {
-          setStatus("error");
-          addLog(`Sincronização pausada: ${result.failed} registro(s) com falha`, "error");
-          break;
+      for (const phase of result.phases) {
+        const label = PHASE_LABELS[phase.phase] || phase.phase;
+        if (phase.status === "completed") {
+          addLog(`${label}: concluído`, "success");
+        } else if (phase.status === "failed") {
+          addLog(`${label}: falhou — ${phase.error || "erro desconhecido"}`, "error");
+        } else if (phase.status === "skipped") {
+          addLog(`${label}: ignorado`, "warning");
         }
-
-        if (result.natural_end || !result.has_more || !result.next_page) {
-          setStatus("completed");
-          addLog("Catálogo concluído", "success");
-          void fetchStatus();
-          break;
-        }
-
-        page = result.next_page;
-        setCurrentPage(page);
-        setStartPage(page);
       }
+
+      setSync(result.overall_status === "completed" ? "completed" : "error");
+      void fetchStatus();
     } catch (err) {
-      setStatus("error");
+      setSync("error");
       addLog(`Erro: ${err instanceof Error ? err.message : "desconhecido"}`, "error");
     } finally {
       runningRef.current = false;
+      setPhaseProgress("");
     }
-  }, [startPage, runBatch, addLog, fetchStatus]);
+  }, [lockHeld, addLog, fetchStatus]);
 
-  const pause = useCallback(() => {
-    abortRef.current = true;
-    setStatus("paused");
-    addLog("Sincronização pausada", "warning");
-  }, [addLog]);
-
-  const reset = useCallback(() => {
-    abortRef.current = true;
-    runningRef.current = false;
-    setStatus("idle");
-    setCurrentPage(PRODUCT_SYNC_FALLBACK.currentPage);
-    setStartPage(PRODUCT_SYNC_FALLBACK.startPage);
-    setTotals(PRODUCT_SYNC_FALLBACK.totals);
-    setLastBatch(null);
-    addLog("Estado resetado", "info");
-  }, [addLog]);
-
-  const sc = statusConfig[status];
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="flex items-center gap-2">
-            <Package className="h-5 w-5" />
-            Produtos
-          </CardTitle>
-          <Badge variant={sc.variant} className="gap-1">
-            {sc.icon}
-            {sc.label}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {statusError ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            <span>{statusError}</span>
-            <Button size="sm" variant="outline" onClick={() => void fetchStatus()}>
-              Tentar novamente
-            </Button>
-          </div>
-        ) : syncStatus ? (
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
-            <Stat label="Produtos no Royale" value={formatNumber(syncStatus.products_count)} />
-            <Stat label="Pedidos" value={formatNumber(syncStatus.orders_count)} />
-            <Stat label="Itens de pedido" value={formatNumber(syncStatus.order_items_count)} />
-            <Stat label="Pedidos sem itens" value={formatNumber(syncStatus.orders_without_items)} />
-            <Stat label="Sem canal" value={formatNumber(syncStatus.orders_without_channel)} />
-          </div>
-        ) : statusLoading ? (
-          <div className="text-sm text-muted-foreground">Carregando status...</div>
-        ) : null}
-
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="w-32">
-            <label className="mb-1 block text-xs text-muted-foreground">Começar da página</label>
-            <Input
-              type="number"
-              min={1}
-              value={startPage}
-              onChange={(e) => setStartPage(Math.max(1, parseInt(e.target.value, 10) || 1))}
-              disabled={status === "running"}
-              className="h-8"
-            />
-          </div>
-          <div className="flex gap-2">
-            {(status === "idle" || status === "completed" || status === "error") && (
-              <Button size="sm" onClick={startSync} className="gap-1.5">
-                <Play className="h-3.5 w-3.5" />
-                Sincronizar catálogo
-              </Button>
-            )}
-            {status === "running" && (
-              <Button size="sm" variant="outline" onClick={pause} className="gap-1.5">
-                <Pause className="h-3.5 w-3.5" />
-                Pausar
-              </Button>
-            )}
-            {status === "paused" && (
-              <Button size="sm" onClick={startSync} className="gap-1.5">
-                <Play className="h-3.5 w-3.5" />
-                Retomar
-              </Button>
-            )}
-            {status !== "idle" && (
-              <Button size="sm" variant="ghost" onClick={reset} className="gap-1.5">
-                <RotateCcw className="h-3.5 w-3.5" />
-                Reiniciar
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {totals.fetched > 0 && (
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
-            <Stat label="Lidos" value={formatNumber(totals.fetched)} />
-            <Stat label="Processados" value={formatNumber(totals.processed)} />
-            <Stat label="Criados" value={formatNumber(totals.created)} />
-            <Stat label="Atualizados" value={formatNumber(totals.updated)} />
-            <Stat label="Ignorados" value={formatNumber(totals.skipped)} />
-            <Stat label="Falhas" value={formatNumber(totals.failed)} className={totals.failed > 0 ? "text-destructive" : ""} />
-          </div>
-        )}
-
-        {lastBatch?.skip_reasons && Object.keys(lastBatch.skip_reasons).length > 0 && (
-          <div className="text-xs text-muted-foreground">
-            Skip reasons: {Object.entries(lastBatch.skip_reasons).map(([k, v]) => `${k}=${v}`).join(", ")}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function OrderItemsCard({ addLog }: { addLog: AddLog }) {
-  const [status, setStatus] = useState<SyncStatusEnum>("idle");
-  const [totals, setTotals] = useState({
-    processed: 0,
-    orders_enriched: 0,
-    items_created: 0,
-    unknown_products: 0,
-    not_found: 0,
-    failed: 0,
-  });
-  const [remaining, setRemaining] = useState<number | null>(null);
-  const runningRef = useRef(false);
-  const abortRef = useRef(false);
-
-  const runBatch = useCallback(async (cursor?: string): Promise<OrderItemsResult> => {
-    const res = await fetch("/api/integrations/backfill-order-items", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 50, after_external_id: cursor }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  }, []);
-
-  const startBackfill = useCallback(async () => {
+  const syncEntity = useCallback(async (entity: string) => {
     if (runningRef.current) return;
     runningRef.current = true;
-    abortRef.current = false;
-    setStatus("running");
+    setSync("running");
+    setPhaseProgress(`Sincronizando ${PHASE_LABELS[entity] || entity}...`);
+    addLog(`Sincronizando ${PHASE_LABELS[entity] || entity}...`);
+
+    try {
+      const res = await fetch(`/api/integrations/sync/${entity}`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addLog(`${PHASE_LABELS[entity] || entity} concluído`, "success");
+      setSync("completed");
+      void fetchStatus();
+    } catch (err) {
+      setSync("error");
+      addLog(`Erro ao sincronizar ${entity}: ${err instanceof Error ? err.message : "desconhecido"}`, "error");
+    } finally {
+      runningRef.current = false;
+      setPhaseProgress("");
+    }
+  }, [addLog, fetchStatus]);
+
+  const backfillOrderItems = useCallback(async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setSync("running");
     addLog("Backfill de itens dos pedidos iniciado");
 
-    let cursor: string | undefined;
     try {
-      while (!abortRef.current) {
-        const result = await runBatch(cursor);
-        setTotals((prev) => ({
-          processed: prev.processed + result.processed,
-          orders_enriched: prev.orders_enriched + result.orders_enriched,
-          items_created: prev.items_created + result.items_created,
-          unknown_products: prev.unknown_products + result.unknown_products,
-          not_found: prev.not_found + result.not_found,
-          failed: prev.failed + result.failed,
-        }));
-        setRemaining(result.remaining_without_items);
-
-        addLog(
-          `Batch: ${result.processed} processados, ${result.items_created} itens criados, ${result.remaining_without_items} restantes`,
-          result.failed > 0 ? "error" : "success",
-        );
-
-        if (result.failed > 0) {
-          setStatus("error");
-          addLog(`Backfill pausado: ${result.failed} falha(s)`, "error");
-          break;
-        }
-
-        if (!result.has_more || !result.next_cursor) {
-          setStatus("completed");
-          addLog("Backfill concluído", "success");
-          break;
-        }
-
-        cursor = result.next_cursor;
-      }
+      const res = await fetch("/api/integrations/backfill-order-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 100 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addLog("Backfill de itens concluído", "success");
+      setSync("completed");
+      void fetchStatus();
     } catch (err) {
-      setStatus("error");
-      addLog(`Erro: ${err instanceof Error ? err.message : "desconhecido"}`, "error");
+      setSync("error");
+      addLog(`Erro no backfill: ${err instanceof Error ? err.message : "desconhecido"}`, "error");
     } finally {
       runningRef.current = false;
+      setPhaseProgress("");
     }
-  }, [runBatch, addLog]);
+  }, [addLog, fetchStatus]);
 
-  const pause = useCallback(() => {
-    abortRef.current = true;
-    setStatus("paused");
-    addLog("Backfill pausado", "warning");
-  }, [addLog]);
-
-  const sc = statusConfig[status];
+  const cs = connectionStatus(status, sync);
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="flex items-center gap-2">
-            <ShoppingCart className="h-5 w-5" />
-            Itens dos Pedidos
-          </CardTitle>
-          <Badge variant={sc.variant} className="gap-1">
-            {sc.icon}
-            {sc.label}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          {(status === "idle" || status === "completed" || status === "error") && (
-            <Button size="sm" onClick={startBackfill} className="gap-1.5">
-              <Play className="h-3.5 w-3.5" />
-              Completar itens dos pedidos
-            </Button>
-          )}
-          {status === "running" && (
-            <Button size="sm" variant="outline" onClick={pause} className="gap-1.5">
-              <Pause className="h-3.5 w-3.5" />
-              Pausar
-            </Button>
-          )}
-        </div>
+    <div className="flex flex-col gap-6 p-6">
+      <PageTitle
+        title="Integrações"
+        description="Sincronização e backfill do Bling."
+      />
 
-        {totals.processed > 0 && (
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
-            <Stat label="Processados" value={formatNumber(totals.processed)} />
-            <Stat label="Pedidos enriquecidos" value={formatNumber(totals.orders_enriched)} />
-            <Stat label="Itens criados" value={formatNumber(totals.items_created)} />
-            <Stat label="Produtos desconhecidos" value={formatNumber(totals.unknown_products)} className={totals.unknown_products > 0 ? "text-yellow-500" : ""} />
-            <Stat label="Não encontrados" value={formatNumber(totals.not_found)} />
-            <Stat label="Falhas" value={formatNumber(totals.failed)} className={totals.failed > 0 ? "text-destructive" : ""} />
-          </div>
-        )}
-
-        {remaining !== null && (
-          <div className="text-xs text-muted-foreground">
-            Pedidos restantes sem itens: {formatNumber(remaining)}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ActivityLog({ logs }: { logs: LogEntry[] }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-    }
-  }, [logs]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Atividade</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div ref={containerRef} className="max-h-64 space-y-1 overflow-y-auto font-mono text-xs">
-          {logs.length === 0 && (
-            <div className="text-muted-foreground">Nenhuma atividade ainda.</div>
-          )}
-          {logs.map((log, i) => (
-            <div key={`${log.time}-${i}`} className="flex items-start gap-2">
-              {iconForType(log.type)}
-              <span className="text-muted-foreground">{log.time}</span>
-              <span>{log.message}</span>
+      {/* Tier 1 — Status Geral */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+          <div className="flex items-center gap-4">
+            <Badge variant={cs.variant} className="gap-1.5 px-3 py-1.5 text-sm">
+              {cs.icon}
+              {cs.label}
+            </Badge>
+            <div className="text-sm text-muted-foreground">
+              Última sincronização: <span className="font-medium text-foreground">{lastSyncTime(status)}</span>
             </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+          </div>
+          <Button
+            size="lg"
+            onClick={runSyncAll}
+            disabled={sync === "running" || lockHeld}
+            className="gap-2"
+          >
+            {sync === "running" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            SINCRONIZAR TUDO AGORA
+          </Button>
+        </CardContent>
+        {phaseProgress && (
+          <div className="border-t px-6 py-2 text-sm text-muted-foreground">
+            <Loader2 className="mr-1.5 inline h-3 w-3 animate-spin" />
+            {phaseProgress}
+          </div>
+        )}
+        {error && (
+          <div className="border-t border-destructive/30 bg-destructive/10 px-6 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+      </Card>
 
-function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`font-medium ${className ?? ""}`}>{value}</div>
+      {/* Tier 2 — Domain Cards */}
+      {loading ? (
+        <div className="text-sm text-muted-foreground">Carregando status...</div>
+      ) : status ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <DomainCard
+            title="Produtos"
+            icon={<Package className="h-4 w-4" />}
+            count={status.products_count}
+            subtitle={`${formatNumber(status.zero_stock)} com estoque zero`}
+            lastSync={status.products_last_synced_at}
+            onSync={() => syncEntity("products")}
+            disabled={sync === "running"}
+          />
+          <DomainCard
+            title="Pedidos"
+            icon={<ShoppingCart className="h-4 w-4" />}
+            count={status.orders_count}
+            subtitle={`${formatNumber(status.orders_without_channel)} sem canal`}
+            lastSync={status.orders_last_synced_at}
+            onSync={() => syncEntity("orders")}
+            disabled={sync === "running"}
+          />
+          <DomainCard
+            title="Itens dos Pedidos"
+            icon={<ShoppingCart className="h-4 w-4" />}
+            count={status.order_items_count}
+            subtitle={`${formatNumber(status.orders_without_items)} pedidos sem itens`}
+            lastSync={status.order_items_last_synced_at}
+            onSync={backfillOrderItems}
+            disabled={sync === "running"}
+            actionLabel="Completar"
+          />
+          <DomainCard
+            title="Canais"
+            icon={<Store className="h-4 w-4" />}
+            count={status.orders_without_channel + (status.orders_count - status.orders_without_channel)}
+            subtitle={`${formatNumber(status.orders_without_channel)} pedidos sem canal`}
+            lastSync={status.channels_last_synced_at}
+            onSync={() => syncEntity("channels")}
+            disabled={sync === "running"}
+          />
+        </div>
+      ) : null}
+
+      {/* Tier 3 — Pendências + Detalhes */}
+      <Card>
+          <CardContent className="space-y-3 py-4">
+            {status ? (
+              <div className="flex flex-wrap gap-3 text-sm">
+                {status.orders_without_items > 0 && (
+                  <Badge variant="outline" className="gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    {formatNumber(status.orders_without_items)} pedidos sem itens
+                  </Badge>
+                )}
+                {status.orders_without_channel > 0 && (
+                  <Badge variant="outline" className="gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    {formatNumber(status.orders_without_channel)} pedidos sem canal
+                  </Badge>
+                )}
+                {status.zero_stock > 0 && (
+                  <Badge variant="outline" className="gap-1">
+                    <Package className="h-3 w-3" />
+                    {formatNumber(status.zero_stock)} produtos com estoque zero
+                  </Badge>
+                )}
+                {status.product_checkpoint && (
+                  <Badge variant="secondary" className="gap-1">
+                    <Clock className="h-3 w-3" />
+                    Checkpoint: página {status.product_checkpoint.last_completed_page}
+                  </Badge>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">Nenhuma pendência carregada.</div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowDetails(!showDetails)}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {showDetails ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              Detalhes técnicos
+            </button>
+
+            {showDetails && (
+              <div className="space-y-3">
+                {syncAllResult && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Última sincronização completa
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5 text-sm sm:grid-cols-2">
+                      {syncAllResult.phases.map((phase) => (
+                        <div key={phase.phase} className="flex items-center justify-between rounded border px-3 py-1.5">
+                          <span>{PHASE_LABELS[phase.phase] || phase.phase}</span>
+                          <PhaseStatusBadge status={phase.status} />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Status geral: {syncAllResult.overall_status}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Log de atividade
+                  </div>
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded border p-3 font-mono text-xs">
+                    {logs.length === 0 && (
+                      <div className="text-muted-foreground">Nenhuma atividade ainda.</div>
+                    )}
+                    {logs.map((log, i) => (
+                      <div key={`${log.time}-${i}`} className="flex items-start gap-2">
+                        {logIcon(log.type)}
+                        <span className="text-muted-foreground">{log.time}</span>
+                        <span>{log.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
     </div>
   );
 }
 
-const statusConfig: Record<
-  SyncStatusEnum,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: ReactNode }
-> = {
-  idle: { label: "Parado", variant: "secondary", icon: <Package className="h-3 w-3" /> },
-  running: { label: "Executando", variant: "default", icon: <Loader2 className="h-3 w-3 animate-spin" /> },
-  paused: { label: "Pausado", variant: "outline", icon: <Pause className="h-3 w-3" /> },
-  completed: { label: "Concluído", variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
-  error: { label: "Erro", variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
-};
+function DomainCard({
+  title,
+  icon,
+  count,
+  subtitle,
+  lastSync,
+  onSync,
+  disabled,
+  actionLabel = "Sincronizar",
+}: {
+  title: string;
+  icon: React.ReactNode;
+  count: number;
+  subtitle: string;
+  lastSync: string | null;
+  onSync: () => void;
+  disabled: boolean;
+  actionLabel?: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-between py-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 font-medium">
+            {icon}
+            {title}
+          </div>
+          <div className="text-2xl font-bold">{formatNumber(count)}</div>
+          <div className="text-xs text-muted-foreground">{subtitle}</div>
+          <div className="text-xs text-muted-foreground">
+            Atualizado: {relativeTime(lastSync)}
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onSync}
+          disabled={disabled}
+          className="gap-1.5"
+        >
+          <RefreshCw className="h-3 w-3" />
+          {actionLabel}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
-function iconForType(type: LogEntry["type"]) {
+function PhaseStatusBadge({ status }: { status: SyncAllPhase["status"] }) {
+  const config = {
+    pending: { label: "Pendente", variant: "outline" as const },
+    running: { label: "Executando", variant: "default" as const },
+    completed: { label: "Concluído", variant: "secondary" as const },
+    failed: { label: "Falhou", variant: "destructive" as const },
+    skipped: { label: "Ignorado", variant: "outline" as const },
+  };
+  const c = config[status];
+  return <Badge variant={c.variant} className="text-xs">{c.label}</Badge>;
+}
+
+function logIcon(type: LogEntry["type"]) {
   switch (type) {
     case "success":
       return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
