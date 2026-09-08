@@ -24,7 +24,7 @@ from backend.modules.integration.checkpoint import CheckpointRepository
 from backend.modules.integration.sync_repository import ISyncLogRepository, SyncDataRepository
 
 if TYPE_CHECKING:
-    from backend.modules.integration.schemas import SyncStatusResponse
+    from backend.modules.integration.schemas import SyncCheckpointSummary, SyncStatusResponse
 
 TokenProvider = Callable[[], Awaitable[str]]
 
@@ -334,11 +334,16 @@ class BlingSyncService:
             return "missing_nome"
         return "other"
 
-    async def get_sync_status(self) -> SyncStatusResponse:
+    async def get_sync_status(
+        self,
+        checkpoint_repo: CheckpointRepository | None = None,
+    ) -> "SyncStatusResponse":
         from sqlalchemy import func, select
 
         from backend.database.models.order import Order, OrderItem
         from backend.database.models.product import Product
+        from backend.database.models.sales_channel import SalesChannel
+        from backend.modules.integration.schemas import SyncCheckpointSummary, SyncStatusResponse
 
         session = self._data_repo.session
         products_count = (await session.execute(select(func.count(Product.id)))).scalar() or 0
@@ -351,12 +356,44 @@ class BlingSyncService:
             )
         ).scalar() or 0
 
+        zero_stock = (
+            await session.execute(
+                select(func.count(Product.id)).where(Product.stock_quantity == 0)
+            )
+        ).scalar() or 0
+
+        products_last_synced_at = (
+            await session.execute(select(func.max(Product.last_synced_at)))
+        ).scalar()
+        orders_last_synced_at = (
+            await session.execute(select(func.max(Order.last_synced_at)))
+        ).scalar()
+        channels_last_synced_at = (
+            await session.execute(select(func.max(SalesChannel.last_synced_at)))
+        ).scalar()
+
+        product_checkpoint = None
+        if checkpoint_repo is not None:
+            cp = await checkpoint_repo.get("products")
+            if cp is not None:
+                product_checkpoint = SyncCheckpointSummary(
+                    status=cp.status,
+                    last_completed_page=cp.last_completed_page,
+                    totals=cp.totals,
+                )
+
         return SyncStatusResponse(
             products_count=products_count,
             orders_count=orders_count,
             order_items_count=order_items_count,
             orders_without_items=orders_without_items,
             orders_without_channel=orders_without_channel,
+            zero_stock=zero_stock,
+            products_last_synced_at=products_last_synced_at,
+            orders_last_synced_at=orders_last_synced_at,
+            order_items_last_synced_at=None,
+            channels_last_synced_at=channels_last_synced_at,
+            product_checkpoint=product_checkpoint,
         )
 
     async def sync_marketplaces(self, agrupador: int = 3) -> SyncResult:

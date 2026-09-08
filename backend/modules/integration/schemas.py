@@ -95,12 +95,24 @@ class SyncProductsBatchResponse(BaseModel):
     skip_reasons: dict[str, int]
 
 
+class SyncCheckpointSummary(BaseModel):
+    status: str
+    last_completed_page: int | None = None
+    totals: dict | None = None
+
+
 class SyncStatusResponse(BaseModel):
     products_count: int
     orders_count: int
     order_items_count: int
     orders_without_items: int
     orders_without_channel: int
+    zero_stock: int = 0
+    products_last_synced_at: datetime | None = None
+    orders_last_synced_at: datetime | None = None
+    order_items_last_synced_at: datetime | None = None
+    channels_last_synced_at: datetime | None = None
+    product_checkpoint: SyncCheckpointSummary | None = None
 
 
 class LockStatusResponse(BaseModel):

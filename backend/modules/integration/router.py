@@ -409,8 +409,9 @@ async def sync_products_batch(
 )
 async def get_sync_status(
     service: BlingSyncService = Depends(get_bling_sync_service),
+    checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository),
 ) -> SyncStatusResponse:
-    return await service.get_sync_status()
+    return await service.get_sync_status(checkpoint_repo=checkpoint_repo)
 
 
 @router.get(
