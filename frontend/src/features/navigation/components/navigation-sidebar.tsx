@@ -29,6 +29,7 @@ export function NavigationSidebar({
   const visibleItems = useMemo(() => {
     if (!user) return [];
     return NAV_ITEMS.filter((item) => {
+      if (item.section && item.section !== "main") return false;
       if (!item.permission) return true;
       return user.permissions.includes(item.permission);
     });

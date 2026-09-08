@@ -104,16 +104,16 @@ describe("Bling sync central navigation", () => {
     );
   });
 
-  it("adds Sync Bling to the real nav source", () => {
-    const item = NAV_ITEMS.find((navItem) => navItem.label === "Sync Bling");
+  it("adds Integrações to the real nav source", () => {
+    const item = NAV_ITEMS.find((navItem) => navItem.label === "Integrações");
 
     expect(item?.href).toBe("/admin/integrations/bling");
   });
 
-  it("keeps Sync Bling visible in the main menu", () => {
+  it("keeps Integrações visible in the main menu", () => {
     const visible = filterPermissions([], NAV_ITEMS) as typeof NAV_ITEMS;
 
-    expect(visible.some((item) => item.label === "Sync Bling")).toBe(true);
+    expect(visible.some((item) => item.label === "Integrações")).toBe(true);
   });
 
   it("does not contain protocol-relative or https://admin menu hrefs", () => {

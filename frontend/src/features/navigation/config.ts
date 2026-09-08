@@ -2,12 +2,7 @@ import {
   LayoutDashboard,
   LineChart,
   Package,
-  Wallet,
   ShoppingBag,
-  ShoppingCart,
-  Bot,
-  BarChart3,
-  Settings,
   RefreshCw,
   type LucideIcon,
 } from "lucide-react";
@@ -20,18 +15,13 @@ export interface NavItem {
   href: string;
   disabled?: boolean;
   permission?: Permission;
+  section?: "main" | "secondary";
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard", permission: Permissions.Dashboard.View },
-  { icon: LineChart, label: "Marketplace", href: "/marketplace", permission: Permissions.Marketplace.View },
-  { icon: Package, label: "Estoque", href: "/inventory", permission: Permissions.Inventory.View },
-  { icon: Wallet, label: "Financeiro", href: "/financial", permission: Permissions.Financial.View },
-  { icon: ShoppingBag, label: "Produtos", href: "/products", permission: Permissions.Products.View },
-  { icon: ShoppingCart, label: "Compras", href: "/purchasing", permission: Permissions.Purchasing.View },
-  { icon: Bot, label: "IA", href: "/ai", disabled: true, permission: Permissions.AI.Access },
-  { icon: BarChart3, label: "Relatórios", href: "/reports", disabled: true, permission: Permissions.Reports.View },
-  { icon: RefreshCw, label: "Sync Bling", href: "/admin/integrations/bling" },
-  { icon: Settings, label: "Configurações", href: "/settings", disabled: true, permission: Permissions.Settings.Manage },
-  { icon: LayoutDashboard, label: "Copiloto Executivo", href: "/executive-copilot", permission: Permissions.Copilot.Access },
+  { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard", permission: Permissions.Dashboard.View, section: "main" },
+  { icon: LineChart, label: "Marketplace", href: "/marketplace", permission: Permissions.Marketplace.View, section: "main" },
+  { icon: ShoppingBag, label: "Produtos", href: "/products", permission: Permissions.Products.View, section: "main" },
+  { icon: Package, label: "Estoque", href: "/inventory", permission: Permissions.Inventory.View, section: "main" },
+  { icon: RefreshCw, label: "Integrações", href: "/admin/integrations/bling", section: "main" },
 ];
